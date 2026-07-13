@@ -174,6 +174,38 @@ class MemoryStore:
                 (FactStatus.ARCHIVED.value, fact_id, self.profile),
             )
 
+    def archive_matching(self, old_text: str, *, target: str | None = None) -> int | None:
+        """Archive the best active fact containing a normalized text fragment."""
+        match = self.find_active_by_fragment(old_text, target=target)
+        if match is None:
+            return None
+        self.archive(match.fact_id)
+        return match.fact_id
+
+    def find_active_by_fragment(self, old_text: str, *, target: str | None = None) -> Fact | None:
+        fragment = normalize_text(old_text)
+        if not fragment:
+            return None
+        params: list[object] = [self.profile, FactStatus.ACTIVE.value, f"%{fragment}%"]
+        target_clause = ""
+        if target:
+            target_clause = " AND target = ?"
+            params.append(target)
+        row = self._connection.execute(
+            f"""SELECT * FROM facts
+            WHERE profile = ? AND status = ? AND normalized_content LIKE ? {target_clause}
+            ORDER BY importance DESC, fact_id DESC LIMIT 1""",
+            params,
+        ).fetchone()
+        return self._row_to_fact(row) if row is not None else None
+
+    def active_count(self) -> int:
+        row = self._connection.execute(
+            "SELECT COUNT(*) FROM facts WHERE profile = ? AND status = ?",
+            (self.profile, FactStatus.ACTIVE.value),
+        ).fetchone()
+        return int(row[0])
+
     def search(self, query: str, *, target: str | None = None, limit: int = 8) -> list[Fact]:
         if limit < 1:
             return []

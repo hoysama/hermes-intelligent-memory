@@ -11,6 +11,7 @@ dev = [
   "pytest-cov==7.0.0",
   "ruff==0.12.12",
   "mypy==1.17.1",
+  "PyYAML==6.0.2",
 ]
 
 [tool.pytest.ini_options]
