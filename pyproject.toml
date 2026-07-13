@@ -1,0 +1,31 @@
+[project]
+name = "hermes-intelligent-memory"
+version = "0.1.0"
+description = "Local-first, Arabic-aware intelligent memory provider for Hermes Agent"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+  "pytest==8.4.2",
+  "pytest-cov==7.0.0",
+  "ruff==0.12.12",
+  "mypy==1.17.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+packages = ["intelligent_memory"]
+mypy_path = "plugin"
