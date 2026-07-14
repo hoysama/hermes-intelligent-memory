@@ -33,6 +33,33 @@ def test_provider_uses_profile_scoped_database(provider, tmp_path) -> None:
     assert provider.database_path.exists()
 
 
+def test_initialize_loads_nested_hermes_config_and_normalizes_yaml_off(tmp_path) -> None:
+    (tmp_path / "config.yaml").write_text(
+        """memory:
+  provider: intelligent_memory
+  intelligent_memory:
+    cloud_mode: off
+    max_recall_facts: 3
+    max_recall_chars: 420
+""",
+        encoding="utf-8",
+    )
+    instance = IntelligentMemoryProvider()
+
+    instance.initialize(
+        "session-1",
+        hermes_home=str(tmp_path),
+        platform="cli",
+        agent_context="primary",
+        agent_identity="default",
+    )
+
+    assert instance.cloud_mode == "off"
+    assert instance.max_recall_facts == 3
+    assert instance.max_recall_chars == 420
+    instance.shutdown()
+
+
 def test_prefetch_is_bounded_and_returns_only_relevant_active_facts(provider) -> None:
     for index in range(12):
         provider.store.remember(

@@ -36,6 +36,8 @@ def test_analyzer_returns_validated_structured_facts() -> None:
                     content=(
                         '{"facts":[{"content":"عبدالله يفضل Bun",'
                         '"kind":"preference","target":"user",'
+                        '"subject":"عبدالله","predicate":"package_manager",'
+                        '"value":"Bun",'
                         '"aliases":["مدير الحزم"],"confidence":1.0,'
                         '"importance":0.95}]}'
                     )
@@ -59,6 +61,9 @@ def test_analyzer_returns_validated_structured_facts() -> None:
     assert len(facts) == 1
     assert facts[0].content == "عبدالله يفضل Bun"
     assert facts[0].aliases == ("مدير الحزم",)
+    assert facts[0].subject == "عبدالله"
+    assert facts[0].predicate == "package_manager"
+    assert facts[0].value == "Bun"
     assert facts[0].confidence == 1.0
 
 

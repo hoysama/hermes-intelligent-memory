@@ -7,6 +7,7 @@ from typing import Any
 
 class FactStatus(StrEnum):
     ACTIVE = "active"
+    CONFLICTED = "conflicted"
     SUPERSEDED = "superseded"
     ARCHIVED = "archived"
     REJECTED = "rejected"
@@ -50,6 +51,7 @@ class Fact:
     importance: float
     status: FactStatus
     supersedes_id: int | None
+    conflicts_with_id: int | None
     created_at: str
     updated_at: str
     retrieval_count: int

@@ -1,13 +1,102 @@
-.venv/
+# ===========================
+# Python
+# ===========================
 __pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+
+# ===========================
+# Virtual Environments
+# ===========================
+.venv/
+venv/
+ENV/
+env/
+
+# ===========================
+# Distribution / Packaging
+# ===========================
+build/
+dist/
+*.egg-info/
+*.egg
+eggs/
+sdist/
+wheels/
+*.whl
+
+# ===========================
+# Testing / Coverage
+# ===========================
 .pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# ===========================
+# Type Checking / Linting
+# ===========================
 .mypy_cache/
 .ruff_cache/
-.coverage
-htmlcov/
-*.py[cod]
+.pytype/
+.dmypy.json
+dmypy.json
+
+# ===========================
+# Database Files (SQLite)
+# ===========================
 *.db
 *.db-shm
 *.db-wal
-build/
-dist/
+*.sqlite3
+
+# ===========================
+# IDE / Editor
+# ===========================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.settings/
+
+# ===========================
+# OS Artifacts
+# ===========================
+NUL
+Thumbs.db
+Desktop.ini
+.DS_Store
+.DS_Store?
+._*
+ehthumbs.db
+
+# ===========================
+# Logs
+# ===========================
+*.log
+logs/
+
+# ===========================
+# Environment Variables
+# ===========================
+.env
+.env.*
+!.env.example
+
+# ===========================
+# Nested Repositories / External
+# ===========================
+repo-review-2/
+
+# ===========================
+# Misc
+# ===========================
+*.bak
+*.tmp
+*.temp
+*.cache

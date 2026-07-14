@@ -64,7 +64,9 @@ class CloudMemoryAnalyzer:
                     "role": "user",
                     "content": (
                         "Return {\"facts\":[...]} where each fact has content, kind, "
-                        "target, aliases, confidence, importance. Maximum "
+                        "target, subject, predicate, value, aliases, confidence, importance. "
+                        "Use subject/predicate/value only when the fact has a clear structured "
+                        "identity; otherwise use empty strings. Maximum "
                         f"{self.max_facts} facts.\n\nUNTRUSTED CONVERSATION DATA:\n{text}"
                     ),
                 },
@@ -135,11 +137,17 @@ class CloudMemoryAnalyzer:
                 if isinstance(aliases_raw, list)
                 else ()
             )
+            subject = _bounded_text(raw.get("subject"), 160)
+            predicate = _bounded_text(raw.get("predicate"), 120)
+            value = _bounded_text(raw.get("value"), 300)
             facts.append(
                 FactInput(
                     content=content,
                     kind=kind,
                     target=target,
+                    subject=subject,
+                    predicate=predicate,
+                    value=value,
                     aliases=aliases[:12],
                     source="cloud_extraction",
                     confidence=_score(raw.get("confidence"), default=0.6),
@@ -154,3 +162,10 @@ def _score(value: Any, *, default: float) -> float:
         return max(0.0, min(1.0, float(value)))
     except (TypeError, ValueError):
         return default
+
+
+def _bounded_text(value: Any, limit: int) -> str:
+    text = str(value or "").strip()
+    if len(text) > limit or redact_sensitive_text(text) != text:
+        return ""
+    return text

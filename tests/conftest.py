@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-PLUGIN_ROOT = Path(__file__).resolve().parents[1] / "plugin"
-if str(PLUGIN_ROOT) not in sys.path:
-    sys.path.insert(0, str(PLUGIN_ROOT))
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PLUGIN_ROOT = PROJECT_ROOT / "plugin"
+for path in (PROJECT_ROOT, PLUGIN_ROOT):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
