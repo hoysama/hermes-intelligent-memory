@@ -1,14 +1,12 @@
 # Hermes Intelligent Memory (`hermes-intelligent-memory`)
 
-[**اللغة العربية**](#-الميزات-الرئيسية-باللغة-العربية) | [**English**](#-overview)
-
----
-
-## 🌐 Overview
+[![Language: Arabic](https://img.shields.io/badge/Language-العربية-green.svg)](README.ar.md)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](pyproject.toml)
+[![License](https://img.shields.io/badge/license-MIT-purple.svg)](LICENSE)
 
 `hermes-intelligent-memory` is a local-first, Arabic-aware intelligent `MemoryProvider` plugin for **Hermes Agent**. It provides high-performance, deterministic hybrid memory retrieval, append-only provenance tracking, and seamless projection sync with `MEMORY.md` and `USER.md`.
 
-Designed to operate seamlessly without cloud dependencies on the hot path, it ensures zero-latency memory prefetching while supporting mixed Arabic/English text processing with advanced character trigram matching and FTS5 search.
+Read this documentation in [🇸🇦 Arabic / بالعربية](README.ar.md).
 
 ---
 
@@ -97,54 +95,6 @@ uv run pytest
 
 ---
 
-<br/>
+## 📄 License
 
----
-
-# 🇸🇦 الميزات الرئيسية والتفاصيل (باللغة العربية)
-
-## 📌 نبذة عن المشروع
-
-مشروع **`hermes-intelligent-memory`** هو محرك ذاكرة ذكي محلي أولي (`Local-First`) ومصمم خصيصاً لدعم **اللغة العربية والمحتوى متعدد اللغات** كخيار رئيسي لوكيل **Hermes Agent**.
-
-يوفر النظام استرجاعاً فوريًا وسريعاً بدون أي تأخير، مع تتبع كامل لأصل وسجل الذاكرة (`Append-Only Provenance`) والمزامنة الآمنة مع ملفات التراكم السريعة `MEMORY.md` و `USER.md`.
-
----
-
-## 🔥 الميزات الأساسية
-
-1. **🇸🇦 دعم عربي متقدم جداً:** يعتمد على التفكيك اللغوي، التداخل اللفظي (`Token Overlap`)، وتقنية الـ `Character Trigrams` للبحث والتعرف على المستندات والكلمات العربية والمركبة بدقة فائقة.
-2. **⚡ استرجاع محلي بدون تأخير (Zero-Latency):** الاستعلام والبحث يتمان 100% محلياً عبر داتابيز SQLite في نمط الـ `WAL` وفهارس `FTS5` دون الاعتماد على السحابة في المسار السريع.
-3. **📜 دورة حياة وحفظ أصل الذاكرة:** تتبع دقيق لجميع حالات الذاكرة (`active`, `superseded`, `archived`, `rejected`) لمنع التعارض أو فقدان التاريخ السلسلي.
-4. **🔄 المزامنة التلقائية للملفات:** كتابة وتزكية الحقائق الهامة تلقائياً بداخل ملفات `MEMORY.md` و `USER.md` باستخدام عمليات كتابة ذرية وبسجلات احتياطية.
-5. **🛠️ فحص التشخيص والأتمتة:** يحتوي على أداة `doctor.py` لفحص سلامة الفهارس وسكربت `installer.py` للتثبيت التلقائي.
-
----
-
-## 🔧 طريقة التثبيت والاستخدام
-
-### 1. التثبيت المحالي:
-```bash
-git clone https://github.com/hoysama/hermes-intelligent-memory.git
-cd hermes-intelligent-memory
-uv pip install -e .
-```
-
-### 2. التفعيل في إعدادات هرمس (`~/.hermes/config.yaml`):
-```yaml
-memory:
-  provider: intelligent_memory
-  intelligent_memory:
-    enabled: true
-```
-
-### 3. الفحص والتحقق:
-```bash
-python doctor.py
-```
-
----
-
-## 📄 الترخيص (License)
-
-تخضع هذه الحزمة لترخيص مشروع Hermes الأصلي. جميع الحقوق محفوظة لـ **HoySama** و **Hermes Ecosystem**.
+This package is licensed under the Hermes Ecosystem License. All rights reserved by **HoySama**.
