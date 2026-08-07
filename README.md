@@ -2,9 +2,10 @@
 
 [![Language: Arabic](https://img.shields.io/badge/Language-العربية-green.svg)](README.ar.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](pyproject.toml)
-[![License](https://img.shields.io/badge/license-MIT-purple.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-purple.svg)](LICENSE)
+[![Hermes Plugin](https://img.shields.io/badge/Hermes-Standalone%20Plugin-emerald.svg)](plugin.yaml)
 
-`hermes-intelligent-memory` is a local-first, Arabic-aware intelligent `MemoryProvider` plugin for **Hermes Agent**. It provides high-performance, deterministic hybrid memory retrieval, append-only provenance tracking, and seamless projection sync with `MEMORY.md` and `USER.md`.
+`hermes-intelligent-memory` is an official, local-first, Arabic/multilingual `MemoryProvider` plugin for **Hermes Agent**. It provides high-performance, deterministic hybrid memory retrieval, append-only provenance tracking, and seamless projection sync with `MEMORY.md` and `USER.md`.
 
 Read this documentation in [🇸🇦 Arabic / بالعربية](README.ar.md).
 
@@ -17,7 +18,7 @@ Read this documentation in [🇸🇦 Arabic / بالعربية](README.ar.md).
 - **📜 Append-Only Provenance & Immutable Lifecycle:** Full memory lifecycle management (`active`, `superseded`, `archived`, `rejected`) with audit trails and lineage tracking.
 - **🔄 Projections Sync (`MEMORY.md` & `USER.md`):** High-importance global facts automatically materialize into markdown projections with atomic writes and safety backups.
 - **🔒 Isolated Profile Scoping:** Profile-scoped storage under `$HERMES_HOME/intelligent_memory/memory.db`.
-- **🛠️ Diagnostics & CLI Utilities:** Built-in health diagnostics (`doctor.py`) and automated installation scripts (`installer.py`).
+- **🛠️ Built-In Hermes Plugin CLI:** Diagnostics, migration utilities, and native plugin hooks.
 
 ---
 
@@ -44,50 +45,55 @@ graph TD
 
 ## 🚀 Quick Start
 
-### 1. Installation
+### 1. One-Line Plugin Installation
 
-Install into your active Hermes environment:
+Install directly into Hermes via the official CLI:
 
 ```bash
-# Clone the repository
+hermes plugin install https://github.com/hoysama/hermes-intelligent-memory
+```
+
+### 2. Manual / Developer Installation
+
+Clone the repository and install as an editable package:
+
+```bash
 git clone https://github.com/hoysama/hermes-intelligent-memory.git
 cd hermes-intelligent-memory
-
-# Install as an editable package or via uv
 uv pip install -e .
 ```
 
-Alternatively, run the automated installer:
+### 3. Activation in Hermes Configuration (`~/.hermes/config.yaml`)
 
-```bash
-python installer.py
-```
-
-### 2. Configuration in Hermes
-
-Add or set the memory provider in your Hermes `config.yaml` (`~/.hermes/config.yaml`):
+Set `intelligent_memory` as your active memory provider in your Hermes `config.yaml`:
 
 ```yaml
 memory:
   provider: intelligent_memory
   intelligent_memory:
-    enabled: true
-    max_prefetched_facts: 10
+    cloud_mode: selective
+    max_recall_facts: 6
+    max_recall_chars: 1800
 ```
 
-### 3. Diagnostics & Verification
+---
 
-Run the built-in doctor utility to verify database integrity, indices, and provider integration:
+## 🛠️ Available Provider Tools
 
-```bash
-python doctor.py
-```
+| Tool Name | Description |
+| :--- | :--- |
+| `intelligent_memory_remember` | Store one durable structured fact in intelligent memory |
+| `intelligent_memory_recall` | Search active intelligent-memory facts relevant to a query |
+| `intelligent_memory_revise` | Replace one durable fact while preserving its lineage |
+| `intelligent_memory_forget` | Archive one fact without deleting its history |
+| `intelligent_memory_status` | Report provider status and fact counts |
+| `intelligent_memory_feedback` | Record usefulness feedback to refine recall scoring |
 
 ---
 
 ## 🧪 Running Tests
 
-Run the comprehensive pytest suite:
+Run the comprehensive test suite:
 
 ```bash
 uv run pytest
@@ -97,4 +103,4 @@ uv run pytest
 
 ## 📄 License
 
-This package is licensed under the Hermes Ecosystem License. All rights reserved by **HoySama**.
+Distributed under the **MIT License**. Created & maintained by **HoySama** for the Hermes Agent Ecosystem.
