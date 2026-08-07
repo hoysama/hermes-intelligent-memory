@@ -50,28 +50,25 @@ graph TD
 Install directly into Hermes via the official CLI:
 
 ```bash
-hermes plugin install https://github.com/hoysama/hermes-intelligent-memory
+hermes plugins install https://github.com/hoysama/hermes-intelligent-memory
 ```
 
-### 2. Manual / Developer Installation
+### 2. Complete Configuration in Hermes (`~/.hermes/config.yaml`)
 
-Clone the repository and install as an editable package:
-
-```bash
-git clone https://github.com/hoysama/hermes-intelligent-memory.git
-cd hermes-intelligent-memory
-uv pip install -e .
-```
-
-### 3. Activation in Hermes Configuration (`~/.hermes/config.yaml`)
-
-Set `intelligent_memory` as your active memory provider in your Hermes `config.yaml`:
+Add the complete `memory` block to your Hermes configuration (`~/.hermes/config.yaml`):
 
 ```yaml
 memory:
   provider: intelligent_memory
+  memory_enabled: true
+  user_profile_enabled: true
+  memory_char_limit: 35000
+  user_char_limit: 35000
+  write_approval: false
+  flush_min_turns: 6
+  nudge_interval: 10
   intelligent_memory:
-    cloud_mode: selective
+    cloud_mode: 'off' # Options: 'off', 'selective', 'session'
     max_recall_facts: 6
     max_recall_chars: 1800
 ```

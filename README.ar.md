@@ -48,24 +48,25 @@ graph TD
 ### 1. التثبيت السريع عبر أمر هرمس (One-Line Install):
 
 ```bash
-hermes plugin install https://github.com/hoysama/hermes-intelligent-memory
+hermes plugins install https://github.com/hoysama/hermes-intelligent-memory
 ```
 
-### 2. التثبيت المباشر للمطورين:
+### 2. التكوين الكامل في إعدادات هرمس (`~/.hermes/config.yaml`):
 
-```bash
-git clone https://github.com/hoysama/hermes-intelligent-memory.git
-cd hermes-intelligent-memory
-uv pip install -e .
-```
-
-### 3. التفعيل في إعدادات هرمس (`~/.hermes/config.yaml`):
+أضف المربع الشامل لإعدادات الذاكرة بداخل ملف الإعدادات الرئيسي (`~/.hermes/config.yaml`):
 
 ```yaml
 memory:
   provider: intelligent_memory
+  memory_enabled: true
+  user_profile_enabled: true
+  memory_char_limit: 35000
+  user_char_limit: 35000
+  write_approval: false
+  flush_min_turns: 6
+  nudge_interval: 10
   intelligent_memory:
-    cloud_mode: selective
+    cloud_mode: 'off' # الخيارات المتاحة: 'off', 'selective', 'session'
     max_recall_facts: 6
     max_recall_chars: 1800
 ```
