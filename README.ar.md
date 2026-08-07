@@ -51,24 +51,24 @@ graph TD
 hermes plugins install https://github.com/hoysama/hermes-intelligent-memory
 ```
 
-### 2. التكوين الكامل في إعدادات هرمس (`~/.hermes/config.yaml`):
+### 2. التكوين الشامل والمفصل في إعدادات هرمس (`~/.hermes/config.yaml`):
 
-أضف المربع الشامل لإعدادات الذاكرة بداخل ملف الإعدادات الرئيسي (`~/.hermes/config.yaml`):
+أضف المربع المفصل والمشروح لإعدادات الذاكرة بداخل ملف الإعدادات الرئيسي (`~/.hermes/config.yaml`):
 
 ```yaml
 memory:
-  provider: intelligent_memory
-  memory_enabled: true
-  user_profile_enabled: true
-  memory_char_limit: 35000
-  user_char_limit: 35000
-  write_approval: false
-  flush_min_turns: 6
-  nudge_interval: 10
+  provider: intelligent_memory  # اسم مزود الذاكرة المفعل
+  memory_enabled: true          # تفعيل نظام حفظ الذاكرة
+  user_profile_enabled: true    # تفعيل حفظ بروفايل وحقائق المستخدم
+  memory_char_limit: 35000      # الحد الأقصى لحروف الذاكرة المسترجعة
+  user_char_limit: 35000        # الحد الأقصى لحروف بروفايل المستخدم
+  write_approval: false         # الموافقة التلقائية على حفظ الذاكرة بدون أسئلة
+  flush_min_turns: 6            # الحد الأدنى للجولات قبل مراجعة الذاكرة
+  nudge_interval: 10            # فترات التنبيه التلقائي للتذكير بالذاكرة
   intelligent_memory:
-    cloud_mode: 'off' # الخيارات المتاحة: 'off', 'selective', 'session'
-    max_recall_facts: 6
-    max_recall_chars: 1800
+    cloud_mode: 'off'           # الخيارات المتاحة: 'off' (محلي فقط), 'selective', 'session'
+    max_recall_facts: 6         # الحد الأقصى لعدد الحقائق المسترجعة لكل جولة
+    max_recall_chars: 1800      # الحد الأقصى لحجم حروف الحقائق المسترجعة
 ```
 
 ---

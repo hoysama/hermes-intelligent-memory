@@ -55,22 +55,22 @@ hermes plugins install https://github.com/hoysama/hermes-intelligent-memory
 
 ### 2. Complete Configuration in Hermes (`~/.hermes/config.yaml`)
 
-Add the complete `memory` block to your Hermes configuration (`~/.hermes/config.yaml`):
+Add the annotated `memory` block to your Hermes configuration (`~/.hermes/config.yaml`):
 
 ```yaml
 memory:
-  provider: intelligent_memory
-  memory_enabled: true
-  user_profile_enabled: true
-  memory_char_limit: 35000
-  user_char_limit: 35000
-  write_approval: false
-  flush_min_turns: 6
-  nudge_interval: 10
+  provider: intelligent_memory  # Active memory provider
+  memory_enabled: true          # Enable durable conversation memory
+  user_profile_enabled: true    # Enable user profile facts tracking
+  memory_char_limit: 35000      # Max total characters for recalled memory context
+  user_char_limit: 35000        # Max total characters for user profile context
+  write_approval: false         # Auto-approve memory writes without manual prompts
+  flush_min_turns: 6            # Minimum turns before memory flush evaluation
+  nudge_interval: 10            # Memory reminder nudge frequency
   intelligent_memory:
-    cloud_mode: 'off' # Options: 'off', 'selective', 'session'
-    max_recall_facts: 6
-    max_recall_chars: 1800
+    cloud_mode: 'off'           # Options: 'off' (local-only), 'selective', 'session'
+    max_recall_facts: 6         # Maximum facts to recall per turn
+    max_recall_chars: 1800      # Maximum character length for recalled facts
 ```
 
 ---
