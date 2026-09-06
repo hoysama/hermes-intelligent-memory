@@ -12,7 +12,13 @@ if TYPE_CHECKING:
 
         pass
 else:
-    from agent.memory_provider import MemoryProvider
+    try:
+        from agent.memory_provider import MemoryProvider
+    except ImportError:
+        class MemoryProvider:  # type: ignore[no-redef]
+            """Standalone fallback when running CLI or tests without Hermes runtime."""
+
+            pass
 
 from .cloud import CloudMemoryAnalyzer
 from .core.models import Fact, FactInput

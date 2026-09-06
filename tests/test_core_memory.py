@@ -102,3 +102,40 @@ def test_archived_and_cross_profile_facts_are_not_recalled(tmp_path) -> None:
 
     assert default_store.search("معلومة قديمة") == []
     assert default_store.search("مشروع سري") == []
+
+
+def test_archive_stale_and_compress_archived(tmp_path) -> None:
+    store = MemoryStore(tmp_path / "memory.db", profile="default")
+    fact1 = store.remember(FactInput(content="Fact 1", source="user")).fact
+    fact2 = store.remember(FactInput(content="Fact 2", source="user")).fact
+    fact3 = store.remember(FactInput(content="Fact 3", source="user")).fact
+
+    # Record unhelpful feedback for fact1 and fact2
+    store.record_feedback(fact1.fact_id, helpful=False)
+    store.record_feedback(fact1.fact_id, helpful=False)
+    store.record_feedback(fact2.fact_id, helpful=False)
+    store.record_feedback(fact2.fact_id, helpful=False)
+
+    archived_count = store.archive_stale(min_unhelpful=2)
+    assert archived_count == 2
+    assert store.get_fact(fact1.fact_id).status == FactStatus.ARCHIVED
+    assert store.get_fact(fact2.fact_id).status == FactStatus.ARCHIVED
+    assert store.get_fact(fact3.fact_id).status == FactStatus.ACTIVE
+
+    # Compress archived facts
+    summary_fact = store.compress_archived(target="memory")
+    assert summary_fact is not None
+    assert summary_fact.kind == "epoch_summary"
+    assert "Historical summary of 2 archived facts" in summary_fact.content
+    provenance = store.list_provenance(summary_fact.fact_id)
+    assert len(provenance) == 1
+    assert provenance[0].metadata.get("count") == 2
+
+    # Verify list_facts filters
+    all_facts = store.list_facts(status=None)
+    assert len(all_facts) == 4
+    archived_only = store.list_facts(status=FactStatus.ARCHIVED)
+    assert len(archived_only) == 2
+
+    # Vacuum executes cleanly
+    store.vacuum()

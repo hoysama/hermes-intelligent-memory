@@ -335,6 +335,126 @@ class MemoryStore:
         ).fetchall()
         return [self._row_to_fact(row) for row in rows]
 
+    def list_facts(
+        self,
+        *,
+        status: FactStatus | str | None = None,
+        target: str | None = None,
+        limit: int = 1_000,
+    ) -> list[Fact]:
+        """List facts with optional status and target filters across all lifecycle states."""
+        params: list[object] = [self.profile]
+        clauses = ["profile = ?"]
+        if status is not None:
+            status_val = status.value if isinstance(status, FactStatus) else str(status)
+            clauses.append("status = ?")
+            params.append(status_val)
+        if target:
+            clauses.append("target = ?")
+            params.append(target)
+        params.append(max(1, int(limit)))
+        query = f"""SELECT * FROM facts
+        WHERE {' AND '.join(clauses)}
+        ORDER BY importance DESC, confidence DESC, updated_at DESC, fact_id DESC
+        LIMIT ?"""
+        rows = self._connection.execute(query, params).fetchall()
+        return [self._row_to_fact(row) for row in rows]
+
+    def archive_stale(
+        self,
+        *,
+        older_than_days: int | None = None,
+        min_unhelpful: int = 2,
+        target: str | None = None,
+    ) -> int:
+        """Archive active facts matching staleness or negative feedback thresholds."""
+        with self._lock:
+            clauses = ["profile = ?", "status = ?"]
+            params: list[object] = [self.profile, FactStatus.ACTIVE.value]
+            conditions: list[str] = []
+            if min_unhelpful > 0:
+                conditions.append("unhelpful_count >= ?")
+                params.append(int(min_unhelpful))
+            if older_than_days is not None and older_than_days >= 0:
+                conditions.append("julianday('now') - julianday(updated_at) >= ?")
+                params.append(float(older_than_days))
+            if not conditions:
+                return 0
+            clauses.append(f"({' OR '.join(conditions)})")
+            if target:
+                clauses.append("target = ?")
+                params.append(target)
+
+            where_sql = " AND ".join(clauses)
+            select_sql = f"SELECT fact_id FROM facts WHERE {where_sql}"
+            stale_ids = [
+                int(row[0]) for row in self._connection.execute(select_sql, params).fetchall()
+            ]
+            if not stale_ids:
+                return 0
+            placeholders = ",".join("?" for _ in stale_ids)
+            self._connection.execute(
+                f"""UPDATE facts
+                SET status = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE fact_id IN ({placeholders}) AND profile = ?""",
+                [FactStatus.ARCHIVED.value, *stale_ids, self.profile],
+            )
+            return len(stale_ids)
+
+    def compress_archived(
+        self,
+        *,
+        target: str = "memory",
+        summary_content: str | None = None,
+    ) -> Fact | None:
+        """Consolidate archived and superseded facts into an epoch summary fact."""
+        with self._lock:
+            rows = self._connection.execute(
+                """SELECT fact_id, content FROM facts
+                WHERE profile = ? AND target = ? AND status IN (?, ?)
+                ORDER BY fact_id ASC""",
+                (
+                    self.profile,
+                    target,
+                    FactStatus.ARCHIVED.value,
+                    FactStatus.SUPERSEDED.value,
+                ),
+            ).fetchall()
+            if not rows:
+                return None
+            fact_ids = [int(row["fact_id"]) for row in rows]
+            contents = [str(row["content"]) for row in rows]
+
+            if not summary_content:
+                bullet_summary = "; ".join(contents[:10])
+                summary_content = (
+                    f"Historical summary of {len(fact_ids)} archived facts: {bullet_summary}"
+                )
+                if len(contents) > 10:
+                    summary_content += f" (and {len(contents) - 10} more)"
+
+            result = self.remember(
+                FactInput(
+                    content=summary_content,
+                    kind="epoch_summary",
+                    target=target,
+                    source="compression",
+                    source_ref=f"compressed:{min(fact_ids)}-{max(fact_ids)}",
+                    profile=self.profile,
+                    confidence=0.9,
+                    importance=0.6,
+                    metadata={"compressed_fact_ids": fact_ids, "count": len(fact_ids)},
+                )
+            )
+            return result.fact
+
+    def vacuum(self) -> None:
+        """Defragment database pages, clean unreferenced FTS entries, and optimize indices."""
+        with self._lock:
+            self._connection.execute("INSERT INTO facts_fts(facts_fts) VALUES ('optimize')")
+            self._connection.execute("PRAGMA optimize")
+            self._connection.execute("VACUUM")
+
     def search(self, query: str, *, target: str | None = None, limit: int = 8) -> list[Fact]:
         if limit < 1:
             return []

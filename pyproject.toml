@@ -28,5 +28,18 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
+warn_unused_ignores = false
 packages = ["intelligent_memory"]
 mypy_path = "plugin"
+
+[[tool.mypy.overrides]]
+module = [
+  "hermes_constants.*",
+  "hermes_constants",
+  "hermes_cli.*",
+  "hermes_cli",
+  "agent.*",
+  "agent",
+]
+ignore_missing_imports = true
+warn_unused_ignores = false
