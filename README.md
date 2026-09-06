@@ -88,6 +88,50 @@ memory:
 
 ---
 
+## 🖥️ Standalone CLI & Management Tools
+
+Manage, search, export, and import your memories directly from the terminal without launching Hermes:
+
+```bash
+# Search active facts
+python -m intelligent_memory.cli search "query terms"
+
+# Export memory to standard formats (markdown, json, json-ld)
+python -m intelligent_memory.cli export --format markdown --output memories.md
+python -m intelligent_memory.cli export --format json-ld --output memories.jsonld
+
+# Import memory facts from seed files
+python -m intelligent_memory.cli import memories.md
+```
+
+---
+
+## 🩺 Self-Healing Diagnostics (`doctor.py`)
+
+Run automated diagnostics and self-healing repair routines for your memory store:
+
+```bash
+# Diagnose and auto-repair broken indices and missing projections
+python doctor.py --fix
+
+# Output diagnostic results as JSON
+python doctor.py --json
+```
+
+- **Index Healing:** Automatically reconstructs corrupted or out-of-sync SQLite FTS5 search tables (`facts_fts`).
+- **Projection Recovery:** Regenerates missing or corrupted `MEMORY.md` and `USER.md` markdown views directly from the canonical SQLite database.
+- **Asset Integrity:** Verifies all plugin file checksums and restores missing files.
+
+---
+
+## 🗄️ Memory Lifecycle & Epoch Compression
+
+- **Staleness Auto-Archiving:** Automatically transitions inactive or negatively rated facts from `active` to `archived`.
+- **Epoch Compression:** Consolidates historical archived facts into structured `epoch_summary` facts to prevent context bloat while retaining complete provenance history.
+- **Vacuum & Page Defragmentation:** Reclaims disk space and optimizes SQLite B-tree pages and FTS token inverted indices.
+
+---
+
 ## 🧪 Running Tests
 
 Run the comprehensive test suite:

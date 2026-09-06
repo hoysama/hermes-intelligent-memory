@@ -7,8 +7,11 @@ Standalone local-first MemoryProvider for Hermes Agent.
 - SQLite canonical fact store under the active `HERMES_HOME`
 - Arabic/English normalization and hybrid lexical retrieval
 - provenance, confidence, importance, lifecycle, and supersession
+- staleness auto-archiving, epoch compression, and index vacuuming
 - bounded per-turn recall without a local model
 - optional selective cloud extraction through Hermes' configured provider
+- standalone CLI for terminal search, multi-format export, and import
+- self-healing diagnostics with automatic repair (`doctor.py --fix`)
 - no API keys owned by this plugin
 
 ## Activation

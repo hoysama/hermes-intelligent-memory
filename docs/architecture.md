@@ -59,6 +59,11 @@ Facts are immutable records with lifecycle links:
 
 Updates create a new active fact and link the old fact through `supersedes_id`. Provenance remains append-only.
 
+Tiering and maintenance operations:
+- `archive_stale()`: automated aging and isolation of stale or negatively evaluated facts.
+- `compress_archived()`: epoch compression rolling up historical archived entries into structured summary facts.
+- `vacuum()`: B-tree defragmentation, inverted FTS index optimization, and page recovery.
+
 ## Hermes Integration
 
 The provider implements the official `MemoryProvider` lifecycle:
@@ -74,4 +79,9 @@ The provider implements the official `MemoryProvider` lifecycle:
 - `on_session_switch`
 - `shutdown`
 
-Provider tools are kept narrow: remember, recall, revise, forget, feedback, and status. Administrative migration, audit, reconciliation, and rollback live in the provider CLI.
+Provider tools are kept narrow: remember, recall, revise, forget, feedback, and status.
+
+## Diagnostic & CLI Administration
+
+- **Self-Healing Diagnostics (`doctor.py`)**: Automatic verification of plugin integrity, runtime discovery, SQLite health, automatic index reconstruction (`facts_fts`), and missing projection view regeneration (`MEMORY.md` / `USER.md`) with `--fix`.
+- **Administrative CLI (`intelligent_memory.cli`)**: Native commands for `status`, `migrate`, `project`, `rollback`, direct semantic terminal `search`, multi-format `export` (JSON, JSON-LD, Markdown), and batch `import`.
