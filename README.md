@@ -73,6 +73,10 @@ memory:
     max_recall_chars: 1800      # Maximum character length for recalled facts
 ```
 
+> [!IMPORTANT]
+> **Why `memory_char_limit` and `user_char_limit` are required in `config.yaml`**:
+> By default, Hermes Agent core enforces a restrictive default ceiling of **2,200 characters** for `MEMORY.md` (and 1,375 for `USER.md`). Once your curated memory exceeds 2,200 characters (e.g. ~50 facts across projects), Hermes core's built-in `MemoryStore` flags the store as full (`(memory full X/2,200)`) and refuses further memory writes. Explicitly setting `memory_char_limit: 35000` and `user_char_limit: 35000` in `config.yaml` removes this artificial ceiling while keeping projections comfortably bounded.
+
 ---
 
 ## 🛠️ Available Provider Tools
