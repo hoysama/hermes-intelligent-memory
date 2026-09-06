@@ -14,12 +14,22 @@ Standalone local-first MemoryProvider for Hermes Agent.
 - self-healing diagnostics with automatic repair (`doctor.py --fix`)
 - no API keys owned by this plugin
 
-## Activation
+## Activation & Configuration
 
-Copy this directory to `$HERMES_HOME/plugins/intelligent_memory`, then run:
+Copy this directory to `$HERMES_HOME/plugins/intelligent_memory`, then configure `~/.hermes/config.yaml`:
 
-```bash
-hermes config set memory.provider intelligent_memory
+```yaml
+memory:
+  provider: intelligent_memory
+  memory_enabled: true
+  user_profile_enabled: true
+  memory_char_limit: 35000  # Prevents false "memory full (X/2200)" lockouts
+  user_char_limit: 35000
+  intelligent_memory:
+    cloud_mode: 'off'       # 'off' | 'selective' | 'session'
+    max_recall_facts: 6
+    max_recall_chars: 1800
+    db_path: "$HERMES_HOME/intelligent_memory/memory.db"
 ```
 
 Start a new Hermes process or session after activation.

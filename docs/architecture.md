@@ -81,6 +81,26 @@ The provider implements the official `MemoryProvider` lifecycle:
 
 Provider tools are kept narrow: remember, recall, revise, forget, feedback, and status.
 
+### Configuration Contracts & Bounds
+
+Hermes Agent binds the provider via `~/.hermes/config.yaml`:
+
+```yaml
+memory:
+  provider: intelligent_memory
+  memory_enabled: true
+  user_profile_enabled: true
+  memory_char_limit: 35000
+  user_char_limit: 35000
+  intelligent_memory:
+    cloud_mode: 'off'
+    max_recall_facts: 6
+    max_recall_chars: 1800
+    db_path: "$HERMES_HOME/intelligent_memory/memory.db"
+```
+
+Hermes Core defaults `memory_char_limit` to 2,200 characters if omitted. Because canonical SQLite fact synchronization materializes rich `MEMORY.md` markdown projections that easily exceed 2,200 chars, setting `memory_char_limit: 35000` and `user_char_limit: 35000` ensures `MemoryStore` never triggers false "Memory full" write locks.
+
 ## Diagnostic & CLI Administration
 
 - **Self-Healing Diagnostics (`doctor.py`)**: Automatic verification of plugin integrity, runtime discovery, SQLite health, automatic index reconstruction (`facts_fts`), and missing projection view regeneration (`MEMORY.md` / `USER.md`) with `--fix`.

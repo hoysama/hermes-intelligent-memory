@@ -63,6 +63,7 @@ dmypy.json
 *~
 .project
 .settings/
+.kombai/
 
 # ===========================
 # OS Artifacts
