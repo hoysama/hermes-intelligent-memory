@@ -12,6 +12,7 @@ dev = [
   "ruff==0.12.12",
   "mypy==1.17.1",
   "PyYAML==6.0.2",
+  "ruamel.yaml>=0.18.0",
 ]
 
 [tool.pytest.ini_options]

@@ -17,7 +17,6 @@ else:
     except ImportError:
         class MemoryProvider:  # type: ignore[no-redef]
             """Standalone fallback when running CLI or tests without Hermes runtime."""
-
             pass
 
 from .cloud import CloudMemoryAnalyzer
@@ -58,7 +57,13 @@ RECALL_SCHEMA = {
 STATUS_SCHEMA = {
     "name": "intelligent_memory_status",
     "description": "Report intelligent-memory provider status without exposing facts.",
-    "parameters": {"type": "object", "properties": {}},
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "action": {"type": "string", "enum": ["check"]}
+        },
+        "required": ["action"],
+    },
 }
 REVISE_SCHEMA = {
     "name": "intelligent_memory_revise",
@@ -141,8 +146,8 @@ class IntelligentMemoryProvider(MemoryProvider):
 
     def _apply_config(self, config: dict[str, Any]) -> None:
         self.cloud_mode = _cloud_mode(config.get("cloud_mode", "selective"))
-        self.max_recall_facts = max(1, min(20, int(config.get("max_recall_facts", 6))))
-        self.max_recall_chars = max(200, int(config.get("max_recall_chars", 1800)))
+        self.max_recall_facts = max(1, min(50, int(config.get("max_recall_facts", 25))))
+        self.max_recall_chars = max(200, int(config.get("max_recall_chars", 10000)))
 
     @staticmethod
     def _register_auxiliary_task() -> None:
@@ -304,7 +309,20 @@ class IntelligentMemoryProvider(MemoryProvider):
             FEEDBACK_SCHEMA,
         ]
 
+    def _ensure_store(self) -> None:
+        if not hasattr(self, "store") or self.store is None:
+            try:
+                from hermes_constants import get_hermes_home
+                hermes_home = get_hermes_home()
+            except Exception:
+                hermes_home = Path.home() / ".hermes"
+            self.database_path = hermes_home / "intelligent_memory" / "memory.db"
+            self.database_path.parent.mkdir(parents=True, exist_ok=True)
+            self.profile = getattr(self, "profile", "default") or "default"
+            self.store = MemoryStore(self.database_path, profile=self.profile)
+
     def handle_tool_call(self, tool_name: str, args: dict[str, Any], **kwargs: Any) -> str:
+        self._ensure_store()
         try:
             if tool_name == "intelligent_memory_remember":
                 aliases_raw = args.get("aliases")
@@ -335,7 +353,7 @@ class IntelligentMemoryProvider(MemoryProvider):
                     }
                 )
             if tool_name == "intelligent_memory_recall":
-                limit = max(1, min(20, int(args.get("limit") or self.max_recall_facts)))
+                limit = max(1, min(50, int(args.get("limit") or self.max_recall_facts)))
                 facts = self.store.search(
                     str(args.get("query") or ""),
                     target=str(args["target"]) if args.get("target") else None,
@@ -435,7 +453,26 @@ class IntelligentMemoryProvider(MemoryProvider):
 
 
 def register(ctx: Any) -> None:
-    ctx.register_memory_provider(IntelligentMemoryProvider())
+    provider = IntelligentMemoryProvider()
+    if hasattr(ctx, "register_memory_provider"):
+        ctx.register_memory_provider(provider)
+
+    tools = [
+        ("intelligent_memory_remember", REMEMBER_SCHEMA),
+        ("intelligent_memory_recall", RECALL_SCHEMA),
+        ("intelligent_memory_status", STATUS_SCHEMA),
+        ("intelligent_memory_revise", REVISE_SCHEMA),
+        ("intelligent_memory_forget", FORGET_SCHEMA),
+        ("intelligent_memory_feedback", FEEDBACK_SCHEMA),
+    ]
+    for name, schema in tools:
+        if hasattr(ctx, "register_tool"):
+            ctx.register_tool(
+                name=name,
+                toolset="memory",
+                schema=schema,
+                handler=lambda args, _name=name, **kw: provider.handle_tool_call(_name, args or {}, **kw),
+            )
 
 
 def _number(value: Any, default: float) -> float:
@@ -466,7 +503,13 @@ def _load_provider_config(hermes_home: Path) -> dict[str, Any]:
     if not config_path.is_file():
         return {}
     try:
-        import yaml  # type: ignore[import-untyped]
+        try:
+            import hermes_yaml as yaml
+        except ImportError:
+            try:
+                import yaml  # type: ignore[import-untyped]
+            except ImportError:
+                import ruamel.yaml as yaml  # type: ignore[import-untyped]
 
         loaded = yaml.safe_load(config_path.read_text(encoding="utf-8-sig")) or {}
         memory = loaded.get("memory") if isinstance(loaded, dict) else None

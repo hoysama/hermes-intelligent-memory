@@ -5,7 +5,7 @@ from pathlib import Path
 from doctor import run_doctor
 from installer import install_plugin
 
-HERMES_SOURCE = Path("C:/Users/HoySa/AppData/Local/hermes/hermes-agent")
+HERMES_SOURCE = Path("/home/hoy/projects/hermes-agent") if Path("/home/hoy/projects/hermes-agent").exists() else Path("C:/Users/HoySa/AppData/Local/hermes/hermes-agent")
 
 
 def test_doctor_detects_installed_plugin_and_database(tmp_path) -> None:
