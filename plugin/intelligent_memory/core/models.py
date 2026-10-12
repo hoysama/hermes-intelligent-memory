@@ -18,6 +18,8 @@ class FactInput:
     content: str
     kind: str = "general"
     target: str = "memory"
+    project: str = ""
+    tags: tuple[str, ...] = ()
     subject: str = ""
     predicate: str = ""
     value: str = ""
@@ -39,24 +41,26 @@ class Fact:
     normalized_content: str
     kind: str
     target: str
-    subject: str
-    predicate: str
-    value: str
-    aliases: tuple[str, ...]
-    scope: str
-    source: str
-    source_ref: str
-    profile: str
-    confidence: float
-    importance: float
-    status: FactStatus
-    supersedes_id: int | None
-    conflicts_with_id: int | None
-    created_at: str
-    updated_at: str
-    retrieval_count: int
-    helpful_count: int
-    unhelpful_count: int
+    project: str = ""
+    tags: tuple[str, ...] = ()
+    subject: str = ""
+    predicate: str = ""
+    value: str = ""
+    aliases: tuple[str, ...] = ()
+    scope: str = "global"
+    source: str = "user"
+    source_ref: str = ""
+    profile: str = "default"
+    confidence: float = 0.5
+    importance: float = 0.5
+    status: FactStatus = FactStatus.ACTIVE
+    supersedes_id: int | None = None
+    conflicts_with_id: int | None = None
+    created_at: str = ""
+    updated_at: str = ""
+    retrieval_count: int = 0
+    helpful_count: int = 0
+    unhelpful_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -64,6 +68,7 @@ class RememberResult:
     fact_id: int
     created: bool
     fact: Fact
+    conflict_fact: Fact | None = None
 
 
 @dataclass(frozen=True)

@@ -52,13 +52,21 @@ def normalize_text(value: str) -> str:
 
 
 def tokens(value: str) -> set[str]:
-    """Return canonical tokens plus transparent bilingual query aliases."""
+    """Return canonical tokens, Arabic prefix-stripped stems, and transparent bilingual query aliases."""
     result: set[str] = set()
     for token in normalize_text(value).split():
         result.add(token)
         alias = _TOKEN_ALIASES.get(token)
         if alias:
             result.add(alias)
+        # Arabic prefix stripping for morphological root/stem matching
+        if len(token) > 4:
+            if token.startswith("وال") and len(token) > 5:
+                result.add(token[3:])
+            elif token.startswith(("بال", "فال", "كال")) and len(token) > 5:
+                result.add(token[3:])
+            elif token.startswith(("ال", "لل")):
+                result.add(token[2:])
     return result
 
 

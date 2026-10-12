@@ -18,6 +18,8 @@ CREATE TABLE IF NOT EXISTS facts (
     content_hash TEXT NOT NULL,
     kind TEXT NOT NULL,
     target TEXT NOT NULL,
+    project TEXT NOT NULL DEFAULT '',
+    tags_json TEXT NOT NULL DEFAULT '[]',
     subject TEXT NOT NULL DEFAULT '',
     predicate TEXT NOT NULL DEFAULT '',
     value TEXT NOT NULL DEFAULT '',
@@ -40,6 +42,8 @@ CREATE TABLE IF NOT EXISTS facts (
 );
 CREATE INDEX IF NOT EXISTS idx_facts_profile_status ON facts(profile, status);
 CREATE INDEX IF NOT EXISTS idx_facts_profile_target ON facts(profile, target);
+CREATE INDEX IF NOT EXISTS idx_facts_profile_project ON facts(profile, project);
+CREATE INDEX IF NOT EXISTS idx_facts_profile_kind ON facts(profile, kind);
 CREATE INDEX IF NOT EXISTS idx_facts_subject_predicate
     ON facts(profile, subject, predicate, status);
 CREATE TABLE IF NOT EXISTS fact_provenance (
@@ -55,21 +59,21 @@ CREATE INDEX IF NOT EXISTS idx_provenance_fact ON fact_provenance(fact_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_provenance_identity
     ON fact_provenance(fact_id, source, source_ref, metadata_json);
 CREATE VIRTUAL TABLE IF NOT EXISTS facts_fts USING fts5(
-    content, aliases_json, subject, predicate, value,
+    content, aliases_json, subject, predicate, value, project, tags_json,
     content='facts', content_rowid='fact_id', tokenize='unicode61'
 );
 CREATE TRIGGER IF NOT EXISTS facts_ai AFTER INSERT ON facts BEGIN
-    INSERT INTO facts_fts(rowid, content, aliases_json, subject, predicate, value)
-    VALUES (new.fact_id, new.content, new.aliases_json, new.subject, new.predicate, new.value);
+    INSERT INTO facts_fts(rowid, content, aliases_json, subject, predicate, value, project, tags_json)
+    VALUES (new.fact_id, new.content, new.aliases_json, new.subject, new.predicate, new.value, new.project, new.tags_json);
 END;
 CREATE TRIGGER IF NOT EXISTS facts_au AFTER UPDATE ON facts BEGIN
-    INSERT INTO facts_fts(facts_fts, rowid, content, aliases_json, subject, predicate, value)
+    INSERT INTO facts_fts(facts_fts, rowid, content, aliases_json, subject, predicate, value, project, tags_json)
     VALUES (
         'delete', old.fact_id, old.content, old.aliases_json,
-        old.subject, old.predicate, old.value
+        old.subject, old.predicate, old.value, old.project, old.tags_json
     );
-    INSERT INTO facts_fts(rowid, content, aliases_json, subject, predicate, value)
-    VALUES (new.fact_id, new.content, new.aliases_json, new.subject, new.predicate, new.value);
+    INSERT INTO facts_fts(rowid, content, aliases_json, subject, predicate, value, project, tags_json)
+    VALUES (new.fact_id, new.content, new.aliases_json, new.subject, new.predicate, new.value, new.project, new.tags_json);
 END;
 """
 
@@ -105,46 +109,54 @@ class MemoryStore:
             "predicate": "TEXT NOT NULL DEFAULT ''",
             "value": "TEXT NOT NULL DEFAULT ''",
             "conflicts_with_id": "INTEGER REFERENCES facts(fact_id)",
+            "project": "TEXT NOT NULL DEFAULT ''",
+            "tags_json": "TEXT NOT NULL DEFAULT '[]'",
         }
         for column, declaration in migrations.items():
             if column not in columns:
                 self._connection.execute(
                     f"ALTER TABLE facts ADD COLUMN {column} {declaration}"
                 )
+        self._connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_facts_profile_project ON facts(profile, project)"
+        )
+        self._connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_facts_profile_kind ON facts(profile, kind)"
+        )
         fts_columns = {
             str(row["name"])
             for row in self._connection.execute("PRAGMA table_info(facts_fts)").fetchall()
         }
-        if "aliases" in fts_columns or "aliases_json" not in fts_columns:
+        if "project" not in fts_columns or "tags_json" not in fts_columns or "aliases" in fts_columns or "aliases_json" not in fts_columns:
             self._connection.executescript(
                 """
                 DROP TRIGGER IF EXISTS facts_ai;
                 DROP TRIGGER IF EXISTS facts_au;
                 DROP TABLE IF EXISTS facts_fts;
                 CREATE VIRTUAL TABLE facts_fts USING fts5(
-                    content, aliases_json, subject, predicate, value,
+                    content, aliases_json, subject, predicate, value, project, tags_json,
                     content='facts', content_rowid='fact_id', tokenize='unicode61'
                 );
                 CREATE TRIGGER facts_ai AFTER INSERT ON facts BEGIN
                     INSERT INTO facts_fts(
-                        rowid, content, aliases_json, subject, predicate, value
+                        rowid, content, aliases_json, subject, predicate, value, project, tags_json
                     ) VALUES (
                         new.fact_id, new.content, new.aliases_json,
-                        new.subject, new.predicate, new.value
+                        new.subject, new.predicate, new.value, new.project, new.tags_json
                     );
                 END;
                 CREATE TRIGGER facts_au AFTER UPDATE ON facts BEGIN
                     INSERT INTO facts_fts(
-                        facts_fts, rowid, content, aliases_json, subject, predicate, value
+                        facts_fts, rowid, content, aliases_json, subject, predicate, value, project, tags_json
                     ) VALUES (
                         'delete', old.fact_id, old.content, old.aliases_json,
-                        old.subject, old.predicate, old.value
+                        old.subject, old.predicate, old.value, old.project, old.tags_json
                     );
                     INSERT INTO facts_fts(
-                        rowid, content, aliases_json, subject, predicate, value
+                        rowid, content, aliases_json, subject, predicate, value, project, tags_json
                     ) VALUES (
                         new.fact_id, new.content, new.aliases_json,
-                        new.subject, new.predicate, new.value
+                        new.subject, new.predicate, new.value, new.project, new.tags_json
                     );
                 END;
                 """
@@ -168,6 +180,9 @@ class MemoryStore:
             raise ValueError("unsafe memory content: persistent prompt-injection pattern")
         content_hash = normalized
         aliases = tuple(dict.fromkeys(alias.strip() for alias in item.aliases if alias.strip()))
+        tags = tuple(dict.fromkeys(tag.strip() for tag in item.tags if tag.strip()))
+        project = item.project.strip()
+
         with self._lock:
             existing = self._connection.execute(
                 "SELECT * FROM facts WHERE profile = ? AND content_hash = ?",
@@ -190,8 +205,11 @@ class MemoryStore:
             status = FactStatus.ACTIVE
             supersedes_id = item.supersedes_id
             conflicts_with_id: int | None = None
+            conflict_fact: Fact | None = None
+
             structured_conflict = self._find_structured_conflict(item)
             if structured_conflict is not None and supersedes_id is None:
+                conflict_fact = structured_conflict
                 if (
                     item.source == "cloud_extraction"
                     and item.confidence < structured_conflict.confidence
@@ -201,20 +219,28 @@ class MemoryStore:
                 else:
                     supersedes_id = structured_conflict.fact_id
 
+            if supersedes_id is None and conflict_fact is None:
+                semantic_conflict = self._find_semantic_conflict(item, normalized)
+                if semantic_conflict is not None:
+                    conflict_fact = semantic_conflict
+                    conflicts_with_id = semantic_conflict.fact_id
+
             now = self._connection.execute("SELECT CURRENT_TIMESTAMP").fetchone()[0]
             cursor = self._connection.execute(
                 """INSERT INTO facts (
                     content, normalized_content, content_hash, kind, target,
-                    subject, predicate, value, aliases_json, scope, source,
-                    source_ref, profile, confidence, importance, status, supersedes_id,
-                    conflicts_with_id, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    project, tags_json, subject, predicate, value, aliases_json,
+                    scope, source, source_ref, profile, confidence, importance,
+                    status, supersedes_id, conflicts_with_id, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     content,
                     normalized,
                     content_hash,
                     item.kind,
                     item.target,
+                    project,
+                    json.dumps(tags, ensure_ascii=False),
                     item.subject,
                     item.predicate,
                     item.value,
@@ -243,7 +269,7 @@ class MemoryStore:
                 )
             self._add_provenance(fact_id, item)
             fact = self.get_fact(fact_id)
-            return RememberResult(fact_id, True, fact)
+            return RememberResult(fact_id, True, fact, conflict_fact=conflict_fact)
 
     def get_fact(self, fact_id: int) -> Fact:
         row = self._connection.execute(
@@ -455,7 +481,16 @@ class MemoryStore:
             self._connection.execute("PRAGMA optimize")
             self._connection.execute("VACUUM")
 
-    def search(self, query: str, *, target: str | None = None, limit: int = 8) -> list[Fact]:
+    def search(
+        self,
+        query: str,
+        *,
+        target: str | None = None,
+        project: str | None = None,
+        kind: str | None = None,
+        limit: int = 8,
+    ) -> list[Fact]:
+        """In-process high-speed semantic reranking over SQLite candidates in < 1ms."""
         if limit < 1:
             return []
         query_tokens = tokens(query)
@@ -463,32 +498,103 @@ class MemoryStore:
         if not query_tokens and not query_ngrams:
             return []
         with self._lock:
-            rows = self._candidate_rows(query, target=target, limit=max(limit * 8, 32))
+            rows = self._candidate_rows(
+                query,
+                target=target,
+                project=project,
+                kind=kind,
+                limit=max(limit * 8, 32),
+            )
             scored: list[tuple[float, Fact]] = []
+            normalized_query = normalize_text(query)
+            clean_project = project.strip().casefold() if project else None
+            clean_kind = kind.strip() if kind else None
+
             for row in rows:
                 fact = self._row_to_fact(row)
-                haystack = " ".join(
-                    (fact.content, fact.subject, fact.predicate, fact.value, *fact.aliases)
-                )
-                token_score = jaccard(query_tokens, tokens(haystack))
-                ngram_score = jaccard(query_ngrams, character_ngrams(haystack))
-                exact_bonus = 0.25 if normalize_text(query) in fact.normalized_content else 0.0
-                score = (
-                    token_score * 0.45
-                    + ngram_score * 0.25
-                    + fact.confidence * 0.15
-                    + fact.importance * 0.15
-                    + exact_bonus
+                if clean_project and fact.project.casefold() != clean_project:
+                    continue
+                if clean_kind and fact.kind != clean_kind:
+                    continue
+
+                score = self._compute_semantic_score(
+                    normalized_query=normalized_query,
+                    query_tokens=query_tokens,
+                    query_ngrams=query_ngrams,
+                    fact=fact,
                 )
                 if score > 0:
                     scored.append((score, fact))
+
             scored.sort(key=lambda pair: (-pair[0], -pair[1].importance, pair[1].fact_id))
-            for _, fact in scored[:limit]:
+            top_facts = [fact for _, fact in scored[:limit]]
+            for fact in top_facts:
                 self._connection.execute(
                     "UPDATE facts SET retrieval_count = retrieval_count + 1 WHERE fact_id = ?",
                     (fact.fact_id,),
                 )
-            return [fact for _, fact in scored[:limit]]
+            return top_facts
+
+    @staticmethod
+    def _compute_semantic_score(
+        *,
+        normalized_query: str,
+        query_tokens: set[str],
+        query_ngrams: set[str],
+        fact: Fact,
+    ) -> float:
+        haystack = " ".join(
+            (
+                fact.content,
+                fact.subject,
+                fact.predicate,
+                fact.value,
+                fact.project,
+                " ".join(fact.tags),
+                *fact.aliases,
+            )
+        )
+        fact_tokens = tokens(haystack)
+        fact_ngrams = character_ngrams(haystack)
+
+        common_tokens = query_tokens & fact_tokens
+        token_coverage = len(common_tokens) / len(query_tokens) if query_tokens else 0.0
+        token_jaccard = jaccard(query_tokens, fact_tokens)
+        lexical_score = token_coverage * 0.65 + token_jaccard * 0.35
+
+        ngram_score = jaccard(query_ngrams, fact_ngrams)
+
+        exact_bonus = 0.0
+        if normalized_query and normalized_query in fact.normalized_content:
+            exact_bonus += 0.30
+        elif normalized_query and (
+            normalized_query in normalize_text(fact.subject)
+            or normalized_query in normalize_text(fact.value)
+        ):
+            exact_bonus += 0.20
+
+        tag_project_bonus = 0.0
+        if fact.project and normalize_text(fact.project) in normalized_query:
+            tag_project_bonus += 0.20
+        for tag in fact.tags:
+            norm_tag = normalize_text(tag)
+            if norm_tag and (norm_tag in normalized_query or norm_tag in query_tokens):
+                tag_project_bonus += 0.15
+
+        confidence_weight = fact.confidence * 0.10
+        importance_weight = fact.importance * 0.10
+        feedback_diff = fact.helpful_count - fact.unhelpful_count
+        feedback_weight = max(-0.10, min(0.10, feedback_diff * 0.03))
+
+        return (
+            lexical_score * 0.40
+            + ngram_score * 0.20
+            + exact_bonus
+            + tag_project_bonus
+            + confidence_weight
+            + importance_weight
+            + feedback_weight
+        )
 
     def provenance_count(self, fact_id: int) -> int:
         row = self._connection.execute(
@@ -556,31 +662,105 @@ class MemoryStore:
                 return fact
         return None
 
-    def _candidate_rows(self, query: str, *, target: str | None, limit: int) -> list[sqlite3.Row]:
+    def _find_semantic_conflict(self, item: FactInput, normalized: str) -> Fact | None:
+        negation_words = {"لا", "ليس", "لن", "لم", "ممنوع", "never", "not", "no", "dont"}
+        stop_words = {
+            "في", "من", "على", "الى", "إلى", "عن", "مع", "هذا", "هذه", "ذلك", "تلك",
+            "كل", "جميع", "دائما", "دائم", "ابدا", "أبدا", "منها", "منه", "بدلا", "فقط",
+            "the", "a", "an", "in", "on", "at", "to", "for", "of", "with", "is", "are"
+        }
+        filter_words = negation_words | stop_words
+
+        incoming_negative = _contains_negation(normalized)
+        incoming_tokens = {t for t in tokens(normalized) if t not in filter_words and len(t) >= 3}
+        if not incoming_tokens:
+            return None
+
+        rows = self._connection.execute(
+            """SELECT * FROM facts
+            WHERE profile = ? AND status = ? AND target = ?
+            ORDER BY fact_id DESC LIMIT 200""",
+            (self.profile, FactStatus.ACTIVE.value, item.target),
+        ).fetchall()
+
+        best: tuple[float, Fact] | None = None
+        for row in rows:
+            fact = self._row_to_fact(row)
+            fact_negative = _contains_negation(fact.normalized_content)
+            if incoming_negative == fact_negative:
+                continue
+
+            fact_tokens = {
+                t for t in tokens(fact.normalized_content) if t not in filter_words and len(t) >= 3
+            }
+            common_tokens = incoming_tokens & fact_tokens
+            if not common_tokens:
+                continue
+
+            min_len = min(len(incoming_tokens), len(fact_tokens))
+            coverage = len(common_tokens) / min_len if min_len else 0.0
+
+            same_project = bool(
+                item.project and fact.project and item.project.casefold() == fact.project.casefold()
+            )
+            tag_overlap = bool(set(item.tags) & set(fact.tags))
+
+            if len(common_tokens) >= 2 or (len(common_tokens) >= 1 and (same_project or tag_overlap or coverage >= 0.20)):
+                score = coverage * 0.5 + (0.3 if same_project else 0.0) + (0.2 if tag_overlap else 0.0)
+                if best is None or score > best[0]:
+                    best = (score, fact)
+
+        return best[1] if best else None
+
+    def _candidate_rows(
+        self,
+        query: str,
+        *,
+        target: str | None = None,
+        project: str | None = None,
+        kind: str | None = None,
+        limit: int = 64,
+    ) -> list[sqlite3.Row]:
         normalized = normalize_text(query)
         params: list[object] = [self.profile, FactStatus.ACTIVE.value]
-        target_clause = ""
+        extra_clauses: list[str] = []
         if target:
-            target_clause = " AND f.target = ?"
+            extra_clauses.append("f.target = ?")
             params.append(target)
+        if project:
+            extra_clauses.append("LOWER(f.project) = LOWER(?)")
+            params.append(project.strip())
+        if kind:
+            extra_clauses.append("f.kind = ?")
+            params.append(kind.strip())
+
+        extra_sql = (" AND " + " AND ".join(extra_clauses)) if extra_clauses else ""
+        query_words = [t for t in tokens(query) if len(t) >= 2]
+
         try:
-            match = " OR ".join(f'"{token}"' for token in tokens(query))
-            if match:
-                params.extend([match, limit])
-                return self._connection.execute(
+            if query_words:
+                match = " OR ".join(f'"{token}"' for token in query_words)
+                fts_params = list(params)
+                fts_params.extend([match, limit])
+                rows = self._connection.execute(
                     f"""SELECT f.* FROM facts f JOIN facts_fts ON facts_fts.rowid = f.fact_id
-                    WHERE f.profile = ? AND f.status = ? {target_clause}
+                    WHERE f.profile = ? AND f.status = ? {extra_sql}
                     AND facts_fts MATCH ? LIMIT ?""",
-                    params,
+                    fts_params,
                 ).fetchall()
+                if rows:
+                    return rows
         except sqlite3.OperationalError:
             pass
+
         like = f"%{normalized}%"
-        params.extend([like, like, like, limit])
+        fallback_params = list(params)
+        fallback_params.extend([like, like, like, like, like, limit])
         return self._connection.execute(
-            f"""SELECT * FROM facts WHERE profile = ? AND status = ? {target_clause}
-            AND (normalized_content LIKE ? OR aliases_json LIKE ? OR value LIKE ?) LIMIT ?""",
-            params,
+            f"""SELECT * FROM facts f WHERE f.profile = ? AND f.status = ? {extra_sql}
+            AND (f.normalized_content LIKE ? OR f.aliases_json LIKE ? OR f.value LIKE ?
+                 OR f.project LIKE ? OR f.tags_json LIKE ?) LIMIT ?""",
+            fallback_params,
         ).fetchall()
 
     def _add_provenance(self, fact_id: int, item: FactInput) -> None:
@@ -599,16 +779,31 @@ class MemoryStore:
 
     @staticmethod
     def _row_to_fact(row: sqlite3.Row) -> Fact:
+        keys = row.keys()
+        project = str(row["project"]) if "project" in keys and row["project"] is not None else ""
+        tags_raw = row["tags_json"] if "tags_json" in keys and row["tags_json"] is not None else "[]"
+        try:
+            tags = tuple(json.loads(tags_raw))
+        except (json.JSONDecodeError, TypeError):
+            tags = ()
+        aliases_raw = row["aliases_json"] if "aliases_json" in keys and row["aliases_json"] is not None else "[]"
+        try:
+            aliases = tuple(json.loads(aliases_raw))
+        except (json.JSONDecodeError, TypeError):
+            aliases = ()
+
         return Fact(
             fact_id=int(row["fact_id"]),
             content=row["content"],
             normalized_content=row["normalized_content"],
             kind=row["kind"],
             target=row["target"],
+            project=project,
+            tags=tags,
             subject=row["subject"],
             predicate=row["predicate"],
             value=row["value"],
-            aliases=tuple(json.loads(row["aliases_json"])),
+            aliases=aliases,
             scope=row["scope"],
             source=row["source"],
             source_ref=row["source_ref"],
@@ -645,5 +840,5 @@ def _unsafe_memory_content(content: str) -> bool:
 def _contains_negation(content: str) -> bool:
     normalized = normalize_text(content)
     return bool(
-        re.search(r"(?:^|\s)(?:لا|ليس|لن|لم|never|not|no)(?:\s|$)", normalized, re.IGNORECASE)
+        re.search(r"(?:^|\s)(?:لا|ليس|لن|لم|ممنوع|never|not|no|dont)(?:\s|$)", normalized, re.IGNORECASE)
     )

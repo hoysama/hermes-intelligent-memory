@@ -8,8 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     class MemoryProvider:
-        """Typing-only stand-in for Hermes' runtime MemoryProvider ABC."""
-
+        """Typing-only stand-in for Hermes runtime MemoryProvider ABC."""
         pass
 else:
     try:
@@ -27,29 +26,48 @@ logger = logging.getLogger(__name__)
 
 REMEMBER_SCHEMA = {
     "name": "intelligent_memory_remember",
-    "description": "Store one durable structured fact in intelligent memory.",
+    "description": "Store one durable structured fact in intelligent memory with optional project, tags, and category.",
     "parameters": {
         "type": "object",
         "properties": {
-            "content": {"type": "string"},
-            "kind": {"type": "string"},
-            "target": {"type": "string", "enum": ["memory", "user"]},
-            "aliases": {"type": "array", "items": {"type": "string"}},
-            "confidence": {"type": "number"},
-            "importance": {"type": "number"},
+            "content": {"type": "string", "description": "The fact or rule content to remember."},
+            "kind": {
+                "type": "string",
+                "enum": ["preference", "fact", "lesson", "correction", "project", "general"],
+                "description": "Category of the fact.",
+            },
+            "project": {
+                "type": "string",
+                "description": "Project or repository name associated with this fact (e.g. 'hermes-agent', 'sentinel').",
+            },
+            "tags": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Domain or topic tags (e.g. ['payments', 'production', 'api']).",
+            },
+            "target": {"type": "string", "enum": ["memory", "user"], "description": "Target memory scope."},
+            "aliases": {"type": "array", "items": {"type": "string"}, "description": "Alternative search terms or keywords."},
+            "confidence": {"type": "number", "description": "Confidence score between 0.0 and 1.0."},
+            "importance": {"type": "number", "description": "Importance score between 0.0 and 1.0."},
         },
         "required": ["content"],
     },
 }
 RECALL_SCHEMA = {
     "name": "intelligent_memory_recall",
-    "description": "Search active intelligent-memory facts relevant to a query.",
+    "description": "Search active intelligent-memory facts relevant to a query with fast in-process semantic reranking and optional project/kind filtering.",
     "parameters": {
         "type": "object",
         "properties": {
-            "query": {"type": "string"},
-            "target": {"type": "string", "enum": ["memory", "user"]},
-            "limit": {"type": "integer"},
+            "query": {"type": "string", "description": "The search query in natural language or keywords."},
+            "target": {"type": "string", "enum": ["memory", "user"], "description": "Filter by target scope."},
+            "project": {"type": "string", "description": "Filter facts associated with a specific project name."},
+            "kind": {
+                "type": "string",
+                "enum": ["preference", "fact", "lesson", "correction", "project", "general"],
+                "description": "Filter facts by category.",
+            },
+            "limit": {"type": "integer", "description": "Maximum number of facts to return (default 8, max 50)."},
         },
         "required": ["query"],
     },
@@ -70,7 +88,12 @@ REVISE_SCHEMA = {
     "description": "Replace one durable fact while preserving its history.",
     "parameters": {
         "type": "object",
-        "properties": {"fact_id": {"type": "integer"}, "content": {"type": "string"}},
+        "properties": {
+            "fact_id": {"type": "integer", "description": "The ID of the fact to replace."},
+            "content": {"type": "string", "description": "The updated fact content."},
+            "project": {"type": "string", "description": "Updated project name."},
+            "tags": {"type": "array", "items": {"type": "string"}, "description": "Updated tags."},
+        },
         "required": ["fact_id", "content"],
     },
 }
@@ -151,13 +174,6 @@ class IntelligentMemoryProvider(MemoryProvider):
 
     @staticmethod
     def _register_auxiliary_task() -> None:
-        """Expose cloud enrichment in Hermes' auxiliary-model picker.
-
-        Exclusive memory providers are loaded through a dedicated collector,
-        not the general PluginContext. At runtime we create the official
-        context facade and use its public registration API rather than writing
-        registry internals directly.
-        """
         try:
             from hermes_cli.plugins import (  # type: ignore[import-untyped]
                 PluginContext,
@@ -178,16 +194,14 @@ class IntelligentMemoryProvider(MemoryProvider):
                 defaults={"provider": "auto", "timeout": 30},
             )
         except Exception as exc:
-            # Local memory remains fully operational when auxiliary task
-            # registration is unavailable on an older/newer Hermes build.
             logger.debug("Auxiliary memory task registration skipped: %s", exc)
 
     def system_prompt_block(self) -> str:
         return (
             "# Intelligent Memory\n"
             "Active local-first memory. Relevant facts are recalled per turn; "
-            "use intelligent_memory_remember for durable facts and "
-            "intelligent_memory_recall for explicit deep recall."
+            "use intelligent_memory_remember for durable facts (with optional project and tags) "
+            "and intelligent_memory_recall for explicit deep recall."
         )
 
     def prefetch(self, query: str, *, session_id: str = "") -> str:
@@ -196,7 +210,9 @@ class IntelligentMemoryProvider(MemoryProvider):
             return ""
         lines = ["# Relevant memory"]
         for fact in facts:
-            line = f"- [{fact.fact_id}; confidence={fact.confidence:.2f}] {fact.content}"
+            tags_part = f" [tags: {', '.join(fact.tags)}]" if fact.tags else ""
+            proj_part = f" [proj: {fact.project}]" if fact.project else ""
+            line = f"- [{fact.fact_id}; confidence={fact.confidence:.2f}]{proj_part}{tags_part} {fact.content}"
             candidate = "\n".join((*lines, line))
             if len(candidate) > self.max_recall_chars:
                 break
@@ -212,8 +228,6 @@ class IntelligentMemoryProvider(MemoryProvider):
         session_id: str = "",
         messages: list[dict[str, Any]] | None = None,
     ) -> None:
-        # Deliberately no per-turn ingestion. Durable extraction occurs at a
-        # session boundary and only when configured, keeping hot turns fast.
         return None
 
     def on_session_end(self, messages: list[dict[str, Any]]) -> None:
@@ -281,8 +295,6 @@ class IntelligentMemoryProvider(MemoryProvider):
     def on_delegation(
         self, task: str, result: str, *, child_session_id: str = "", **kwargs: Any
     ) -> None:
-        # Delegation output is not durable by default. The parent agent may
-        # explicitly remember a stable result through the provider tool.
         return None
 
     def on_session_switch(
@@ -327,15 +339,24 @@ class IntelligentMemoryProvider(MemoryProvider):
             if tool_name == "intelligent_memory_remember":
                 aliases_raw = args.get("aliases")
                 aliases = (
-                    tuple(str(value) for value in aliases_raw)
+                    tuple(str(value).strip() for value in aliases_raw if str(value).strip())
                     if isinstance(aliases_raw, list)
                     else ()
                 )
+                tags_raw = args.get("tags")
+                tags = (
+                    tuple(str(value).strip() for value in tags_raw if str(value).strip())
+                    if isinstance(tags_raw, list)
+                    else ()
+                )
+                project = str(args.get("project") or "").strip()
                 result = self.store.remember(
                     FactInput(
                         content=str(args.get("content") or ""),
                         kind=str(args.get("kind") or "general"),
                         target=str(args.get("target") or "memory"),
+                        project=project,
+                        tags=tags,
                         aliases=aliases,
                         source="provider_tool",
                         source_ref=self.session_id,
@@ -344,19 +365,40 @@ class IntelligentMemoryProvider(MemoryProvider):
                         importance=_number(args.get("importance"), 0.7),
                     )
                 )
-                return _json(
-                    {
-                        "success": True,
-                        "done": True,
-                        "fact_id": result.fact_id,
-                        "created": result.created,
+                payload: dict[str, Any] = {
+                    "success": True,
+                    "done": True,
+                    "fact_id": result.fact_id,
+                    "created": result.created,
+                }
+                if result.conflict_fact is not None:
+                    cf = result.conflict_fact
+                    payload["conflict_detected"] = True
+                    payload["warning"] = (
+                        f"Conflict detected with active fact #{cf.fact_id}: '{cf.content}'"
+                    )
+                    payload["conflicting_fact"] = {
+                        "fact_id": cf.fact_id,
+                        "content": cf.content,
+                        "project": cf.project,
+                        "kind": cf.kind,
                     }
-                )
+                    payload["suggestion"] = (
+                        f"If this new fact supersedes fact #{cf.fact_id}, "
+                        f"call intelligent_memory_revise(fact_id={cf.fact_id}, content=...)"
+                    )
+                return _json(payload)
+
             if tool_name == "intelligent_memory_recall":
                 limit = max(1, min(50, int(args.get("limit") or self.max_recall_facts)))
+                project_arg = str(args["project"]).strip() if args.get("project") else None
+                kind_arg = str(args["kind"]).strip() if args.get("kind") else None
+                target_arg = str(args["target"]).strip() if args.get("target") else None
                 facts = self.store.search(
                     str(args.get("query") or ""),
-                    target=str(args["target"]) if args.get("target") else None,
+                    target=target_arg,
+                    project=project_arg,
+                    kind=kind_arg,
                     limit=limit,
                 )
                 return _json(
@@ -365,6 +407,7 @@ class IntelligentMemoryProvider(MemoryProvider):
                         "facts": [self._fact_payload(fact) for fact in facts],
                     }
                 )
+
             if tool_name == "intelligent_memory_status":
                 return _json(
                     {
@@ -376,14 +419,27 @@ class IntelligentMemoryProvider(MemoryProvider):
                         "last_cloud_error": self.last_cloud_error,
                     }
                 )
+
             if tool_name == "intelligent_memory_revise":
                 fact_id = _required_int(args.get("fact_id"))
                 old = self.store.get_fact(fact_id)
+                project = (
+                    str(args["project"]).strip()
+                    if args.get("project") is not None
+                    else old.project
+                )
+                tags = (
+                    tuple(str(v).strip() for v in args["tags"] if str(v).strip())
+                    if isinstance(args.get("tags"), list)
+                    else old.tags
+                )
                 result = self.store.remember(
                     FactInput(
                         content=str(args.get("content") or ""),
                         kind=old.kind,
                         target=old.target,
+                        project=project,
+                        tags=tags,
                         subject=old.subject,
                         predicate=old.predicate,
                         value=old.value,
@@ -398,10 +454,12 @@ class IntelligentMemoryProvider(MemoryProvider):
                     )
                 )
                 return _json({"success": True, "done": True, "fact_id": result.fact_id})
+
             if tool_name == "intelligent_memory_forget":
                 fact_id = _required_int(args.get("fact_id"))
                 self.store.archive(fact_id)
                 return _json({"success": True, "done": True, "fact_id": fact_id})
+
             if tool_name == "intelligent_memory_feedback":
                 fact_id = _required_int(args.get("fact_id"))
                 fact = self.store.record_feedback(
@@ -430,8 +488,6 @@ class IntelligentMemoryProvider(MemoryProvider):
         ]
 
     def save_config(self, values: dict[str, Any], hermes_home: str) -> None:
-        # Generic Hermes setup stores the activation key. Advanced provider
-        # settings are read from config.yaml and intentionally need no secrets.
         return None
 
     def shutdown(self) -> None:
@@ -446,6 +502,8 @@ class IntelligentMemoryProvider(MemoryProvider):
             "content": fact.content,
             "kind": fact.kind,
             "target": fact.target,
+            "project": fact.project,
+            "tags": list(fact.tags),
             "confidence": fact.confidence,
             "importance": fact.importance,
             "source": fact.source,
@@ -475,53 +533,52 @@ def register(ctx: Any) -> None:
             )
 
 
+def _cloud_mode(value: Any) -> str:
+    candidate = str(value or "selective").lower()
+    return candidate if candidate in {"off", "selective", "session"} else "selective"
+
+
 def _number(value: Any, default: float) -> float:
     try:
-        return max(0.0, min(1.0, float(value)))
+        return float(value)
     except (TypeError, ValueError):
         return default
 
 
 def _required_int(value: Any) -> int:
-    if value is None or isinstance(value, bool):
-        raise ValueError("fact_id is required")
-    try:
-        return int(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("fact_id must be an integer") from exc
-
-
-def _cloud_mode(value: Any) -> str:
-    if value is False:
-        return "off"
-    normalized = str(value or "selective").strip().lower()
-    return normalized if normalized in {"off", "selective", "session"} else "selective"
-
-
-def _load_provider_config(hermes_home: Path) -> dict[str, Any]:
-    config_path = hermes_home / "config.yaml"
-    if not config_path.is_file():
-        return {}
-    try:
-        try:
-            import hermes_yaml as yaml
-        except ImportError:
-            try:
-                import yaml  # type: ignore[import-untyped]
-            except ImportError:
-                import ruamel.yaml as yaml  # type: ignore[import-untyped]
-
-        loaded = yaml.safe_load(config_path.read_text(encoding="utf-8-sig")) or {}
-        memory = loaded.get("memory") if isinstance(loaded, dict) else None
-        provider = memory.get("intelligent_memory") if isinstance(memory, dict) else None
-        return dict(provider) if isinstance(provider, dict) else {}
-    except Exception as exc:
-        logger.debug("Intelligent memory config could not be loaded: %s", exc)
-        return {}
+    if value is None:
+        raise ValueError("missing required integer argument")
+    return int(value)
 
 
 def _json(payload: dict[str, Any]) -> str:
     return json.dumps(payload, ensure_ascii=False)
 
 
-__all__ = ["IntelligentMemoryProvider", "register"]
+def _load_provider_config(hermes_home: Path) -> dict[str, Any]:
+    candidates = (
+        hermes_home / "config.yaml",
+        hermes_home / "config.yml",
+    )
+    for path in candidates:
+        if not path.is_file():
+            continue
+        try:
+            try:
+                from ruamel.yaml import YAML
+                yaml = YAML(typ="safe")
+                with open(path, "r", encoding="utf-8") as f:
+                    data = yaml.load(f)
+            except ImportError:
+                import yaml
+                with open(path, "r", encoding="utf-8") as f:
+                    data = yaml.safe_load(f)
+            if isinstance(data, dict):
+                memory = data.get("memory")
+                if isinstance(memory, dict):
+                    settings = memory.get("intelligent_memory")
+                    if isinstance(settings, dict):
+                        return dict(settings)
+        except Exception as exc:
+            logger.warning("Could not parse config from %s: %s", path, exc)
+    return {}

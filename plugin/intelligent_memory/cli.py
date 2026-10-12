@@ -29,6 +29,8 @@ def build_parser(parser: argparse.ArgumentParser | None = None) -> argparse.Argu
     search.add_argument("query", type=str, help="Search query string")
     search.add_argument("--hermes-home", type=Path, default=None)
     search.add_argument("--target", choices=["memory", "user"], default=None)
+    search.add_argument("--project", type=str, default=None, help="Filter by project")
+    search.add_argument("--kind", type=str, default=None, help="Filter by kind")
     search.add_argument("--limit", type=int, default=8)
 
     export = subparsers.add_parser("export")
@@ -106,7 +108,7 @@ def run_command(args: argparse.Namespace) -> int:
             _print_json({"restored": True, "backup": str(args.backup)})
             return 0
         if args.command == "search":
-            facts = store.search(args.query, target=args.target, limit=args.limit)
+            facts = store.search(args.query, target=args.target, project=args.project, kind=args.kind, limit=args.limit)
             _print_json(
                 {
                     "query": args.query,
