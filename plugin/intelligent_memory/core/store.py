@@ -42,8 +42,6 @@ CREATE TABLE IF NOT EXISTS facts (
 );
 CREATE INDEX IF NOT EXISTS idx_facts_profile_status ON facts(profile, status);
 CREATE INDEX IF NOT EXISTS idx_facts_profile_target ON facts(profile, target);
-CREATE INDEX IF NOT EXISTS idx_facts_profile_project ON facts(profile, project);
-CREATE INDEX IF NOT EXISTS idx_facts_profile_kind ON facts(profile, kind);
 CREATE INDEX IF NOT EXISTS idx_facts_subject_predicate
     ON facts(profile, subject, predicate, status);
 CREATE TABLE IF NOT EXISTS fact_provenance (
@@ -58,23 +56,6 @@ CREATE TABLE IF NOT EXISTS fact_provenance (
 CREATE INDEX IF NOT EXISTS idx_provenance_fact ON fact_provenance(fact_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_provenance_identity
     ON fact_provenance(fact_id, source, source_ref, metadata_json);
-CREATE VIRTUAL TABLE IF NOT EXISTS facts_fts USING fts5(
-    content, aliases_json, subject, predicate, value, project, tags_json,
-    content='facts', content_rowid='fact_id', tokenize='unicode61'
-);
-CREATE TRIGGER IF NOT EXISTS facts_ai AFTER INSERT ON facts BEGIN
-    INSERT INTO facts_fts(rowid, content, aliases_json, subject, predicate, value, project, tags_json)
-    VALUES (new.fact_id, new.content, new.aliases_json, new.subject, new.predicate, new.value, new.project, new.tags_json);
-END;
-CREATE TRIGGER IF NOT EXISTS facts_au AFTER UPDATE ON facts BEGIN
-    INSERT INTO facts_fts(facts_fts, rowid, content, aliases_json, subject, predicate, value, project, tags_json)
-    VALUES (
-        'delete', old.fact_id, old.content, old.aliases_json,
-        old.subject, old.predicate, old.value, old.project, old.tags_json
-    );
-    INSERT INTO facts_fts(rowid, content, aliases_json, subject, predicate, value, project, tags_json)
-    VALUES (new.fact_id, new.content, new.aliases_json, new.subject, new.predicate, new.value, new.project, new.tags_json);
-END;
 """
 
 
