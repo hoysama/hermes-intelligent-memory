@@ -26,47 +26,54 @@ logger = logging.getLogger(__name__)
 
 REMEMBER_SCHEMA = {
     "name": "intelligent_memory_remember",
-    "description": "Store one durable structured fact in intelligent memory with optional project, tags, and category.",
+    "description": (
+        "Store one durable structured fact in intelligent memory with optional project, tags, and category. "
+        "Automatically checks for conflicts with existing facts; if a contradiction is detected, returns a warning "
+        "with the conflicting fact_id so you can revise/supersede it."
+    ),
     "parameters": {
         "type": "object",
         "properties": {
-            "content": {"type": "string", "description": "The fact or rule content to remember."},
+            "content": {"type": "string", "description": "The fact, rule, or preference content to remember."},
             "kind": {
                 "type": "string",
                 "enum": ["preference", "fact", "lesson", "correction", "project", "general"],
-                "description": "Category of the fact.",
+                "description": "Category of the fact: preference (user likes/dislikes), fact (static reality), lesson (learned insight), correction (behavioral fix), project (tech stack/architecture), general.",
             },
             "project": {
                 "type": "string",
-                "description": "Project or repository name associated with this fact (e.g. 'hermes-agent', 'sentinel').",
+                "description": "Project or repository name associated with this fact (e.g. 'hermes-agent', 'sentinel', 'billing').",
             },
             "tags": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "Domain or topic tags (e.g. ['payments', 'production', 'api']).",
+                "description": "Domain or topic tags for categorization and fast semantic search (e.g. ['payments', 'production', 'api']).",
             },
-            "target": {"type": "string", "enum": ["memory", "user"], "description": "Target memory scope."},
-            "aliases": {"type": "array", "items": {"type": "string"}, "description": "Alternative search terms or keywords."},
-            "confidence": {"type": "number", "description": "Confidence score between 0.0 and 1.0."},
-            "importance": {"type": "number", "description": "Importance score between 0.0 and 1.0."},
+            "target": {"type": "string", "enum": ["memory", "user"], "description": "Target memory scope ('memory' for agent/world knowledge, 'user' for user persona/profile)."},
+            "aliases": {"type": "array", "items": {"type": "string"}, "description": "Alternative search terms or keywords in Arabic or English."},
+            "confidence": {"type": "number", "description": "Confidence score between 0.0 and 1.0 (default 0.9)."},
+            "importance": {"type": "number", "description": "Importance score between 0.0 and 1.0 (default 0.7)."},
         },
         "required": ["content"],
     },
 }
 RECALL_SCHEMA = {
     "name": "intelligent_memory_recall",
-    "description": "Search active intelligent-memory facts relevant to a query with fast in-process semantic reranking and optional project/kind filtering.",
+    "description": (
+        "Search active intelligent-memory facts relevant to a query using ultra-fast in-process semantic reranking. "
+        "Supports optional filtering by specific project and fact category (kind)."
+    ),
     "parameters": {
         "type": "object",
         "properties": {
-            "query": {"type": "string", "description": "The search query in natural language or keywords."},
-            "target": {"type": "string", "enum": ["memory", "user"], "description": "Filter by target scope."},
-            "project": {"type": "string", "description": "Filter facts associated with a specific project name."},
+            "query": {"type": "string", "description": "Search query in natural language or keywords (supports Arabic and English)."},
+            "project": {"type": "string", "description": "Optional: restrict recall strictly to facts belonging to this project name."},
             "kind": {
                 "type": "string",
                 "enum": ["preference", "fact", "lesson", "correction", "project", "general"],
-                "description": "Filter facts by category.",
+                "description": "Optional: restrict recall strictly to this category (e.g. 'preference' to only recall user preferences).",
             },
+            "target": {"type": "string", "enum": ["memory", "user"], "description": "Target memory scope ('memory' or 'user')."},
             "limit": {"type": "integer", "description": "Maximum number of facts to return (default 8, max 50)."},
         },
         "required": ["query"],
@@ -85,14 +92,17 @@ STATUS_SCHEMA = {
 }
 REVISE_SCHEMA = {
     "name": "intelligent_memory_revise",
-    "description": "Replace one durable fact while preserving its history.",
+    "description": (
+        "Replace/supersede an existing fact with an updated version while preserving history. "
+        "Use this when updating a conflicting or outdated fact after receiving a conflict warning."
+    ),
     "parameters": {
         "type": "object",
         "properties": {
-            "fact_id": {"type": "integer", "description": "The ID of the fact to replace."},
+            "fact_id": {"type": "integer", "description": "The exact fact_id of the fact to be replaced."},
             "content": {"type": "string", "description": "The updated fact content."},
-            "project": {"type": "string", "description": "Updated project name."},
-            "tags": {"type": "array", "items": {"type": "string"}, "description": "Updated tags."},
+            "project": {"type": "string", "description": "Optional updated project name."},
+            "tags": {"type": "array", "items": {"type": "string"}, "description": "Optional updated tags."},
         },
         "required": ["fact_id", "content"],
     },
@@ -199,9 +209,10 @@ class IntelligentMemoryProvider(MemoryProvider):
     def system_prompt_block(self) -> str:
         return (
             "# Intelligent Memory\n"
-            "Active local-first memory. Relevant facts are recalled per turn; "
-            "use intelligent_memory_remember for durable facts (with optional project and tags) "
-            "and intelligent_memory_recall for explicit deep recall."
+            "Active local-first memory with in-process semantic reranking.\n"
+            "- Save durable facts with `intelligent_memory_remember(content, project, tags, kind)`.\n"
+            "- When a conflict warning is returned, inspect the conflicting fact_id and call `intelligent_memory_revise` to replace it.\n"
+            "- Deep recall with optional project/kind filters: `intelligent_memory_recall(query, project, kind)`."
         )
 
     def prefetch(self, query: str, *, session_id: str = "") -> str:
