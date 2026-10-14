@@ -47,7 +47,13 @@ graph TD
 
 ### 1. التثبيت السريع عبر أمر هرمس (One-Line Install):
 
+التثبيت مباشرة عبر كتالوج إضافات هرمس الرسمي (موصى به) أو عبر رابط المستودع:
+
 ```bash
+# عبر كتالوج إضافات هرمس الرسمي:
+hermes plugins install intelligent_memory
+
+# أو مباشرة من مستودع GitHub:
 hermes plugins install https://github.com/hoysama/hermes-intelligent-memory
 ```
 

@@ -7,3 +7,10 @@ hooks:
   - on_pre_compress
   - on_memory_write
   - on_delegation
+provides_tools:
+  - intelligent_memory_remember
+  - intelligent_memory_recall
+  - intelligent_memory_status
+  - intelligent_memory_revise
+  - intelligent_memory_forget
+  - intelligent_memory_feedback

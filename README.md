@@ -47,9 +47,13 @@ graph TD
 
 ### 1. One-Line Plugin Installation
 
-Install directly into Hermes via the official CLI:
+Install via the official Hermes Plugin Catalog (Recommended) or direct repository URL:
 
 ```bash
+# Via Hermes Plugin Catalog:
+hermes plugins install intelligent_memory
+
+# Or directly from GitHub:
 hermes plugins install https://github.com/hoysama/hermes-intelligent-memory
 ```
 
