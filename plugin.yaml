@@ -1,5 +1,5 @@
 name: intelligent_memory
-version: 0.1.0
+version: 0.2.0
 kind: exclusive
 description: "Local-first Arabic/English intelligent memory with canonical facts, conflict lifecycle, bounded recall, and selective Hermes cloud enrichment."
 hooks:
