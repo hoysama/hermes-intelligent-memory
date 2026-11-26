@@ -54,10 +54,12 @@ Facts are immutable records with lifecycle links:
 
 - `active`: eligible for recall
 - `superseded`: replaced by a newer fact
-- `archived`: deliberately forgotten from active recall
+- `archived`: removed from active recall with history intact
+- `revoked`: hidden reversibly, tracked in the audit log
+- `erased`: text and provenance deleted, with only a SHA-256 tombstone in the audit log
 - `rejected`: blocked by validation or security policy
 
-Updates create a new active fact and link the old fact through `supersedes_id`. Provenance remains append-only.
+Updates create a new active fact and link the old fact through `supersedes_id`. Provenance remains append-only for normal lifecycle events (explicit erasure removes its rows and records only a tombstone hash) and can store an optional verbatim quote with character offsets. Scope labels provide a narrower retrieval filter; profiles remain the hard isolation boundary.
 
 Tiering and maintenance operations:
 - `archive_stale()`: automated aging and isolation of stale or negatively evaluated facts.
@@ -79,7 +81,7 @@ The provider implements the official `MemoryProvider` lifecycle:
 - `on_session_switch`
 - `shutdown`
 
-Provider tools are kept narrow: remember, recall, revise, forget, feedback, and status.
+Provider tools are kept narrow: remember, recall, revise, forget (archive/revoke/erase), restore, feedback, and status. Recall can include up to three verbatim source quotes per fact when they exist.
 
 ### Configuration Contracts & Bounds
 
@@ -104,4 +106,4 @@ Hermes Core defaults `memory_char_limit` to 2,200 characters if omitted. Because
 ## Diagnostic & CLI Administration
 
 - **Self-Healing Diagnostics (`doctor.py`)**: Automatic verification of plugin integrity, runtime discovery, SQLite health, automatic index reconstruction (`facts_fts`), and missing projection view regeneration (`MEMORY.md` / `USER.md`) with `--fix`.
-- **Administrative CLI (`intelligent_memory.cli`)**: Native commands for `status`, `migrate`, `project`, `rollback`, direct semantic terminal `search`, multi-format `export` (JSON, JSON-LD, Markdown), and batch `import`.
+- **Administrative CLI (`intelligent_memory.cli`)**: Native commands for `status`, `migrate`, `project`, `rollback`, direct lexical terminal `search`, multi-format `export` (JSON, JSON-LD, Markdown), and batch `import`.

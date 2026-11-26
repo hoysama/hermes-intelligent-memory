@@ -47,9 +47,16 @@ REMEMBER_SCHEMA = {
             "tags": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "Domain or topic tags for categorization and fast semantic search (e.g. ['payments', 'production', 'api']).",
+                "description": "Domain or topic tags for categorization and fast lexical search (e.g. ['payments', 'production', 'api']).",
             },
             "target": {"type": "string", "enum": ["memory", "user"], "description": "Target memory scope ('memory' for agent/world knowledge, 'user' for user persona/profile)."},
+            "scope": {
+                "type": "string",
+                "description": (
+                    "Optional visibility label for this fact (default: 'global'). "
+                    "Profiles remain the hard isolation boundary."
+                ),
+            },
             "aliases": {"type": "array", "items": {"type": "string"}, "description": "Alternative search terms or keywords in Arabic or English."},
             "confidence": {"type": "number", "description": "Confidence score between 0.0 and 1.0 (default 0.9)."},
             "importance": {"type": "number", "description": "Importance score between 0.0 and 1.0 (default 0.7)."},
@@ -60,8 +67,8 @@ REMEMBER_SCHEMA = {
 RECALL_SCHEMA = {
     "name": "intelligent_memory_recall",
     "description": (
-        "Search active intelligent-memory facts relevant to a query using ultra-fast in-process semantic reranking. "
-        "Supports optional filtering by specific project and fact category (kind)."
+        "Search active intelligent-memory facts relevant to a query using ultra-fast in-process lexical reranking. "
+        "Supports optional filtering by project, fact category (kind), and scope."
     ),
     "parameters": {
         "type": "object",
@@ -74,7 +81,14 @@ RECALL_SCHEMA = {
                 "description": "Optional: restrict recall strictly to this category (e.g. 'preference' to only recall user preferences).",
             },
             "target": {"type": "string", "enum": ["memory", "user"], "description": "Target memory scope ('memory' or 'user')."},
-            "limit": {"type": "integer", "description": "Maximum number of facts to return (default 8, max 50)."},
+            "scope": {
+                "type": "string",
+                "description": (
+                    "Optional visibility label; when set, only facts with this "
+                    "scope are returned."
+                ),
+            },
+            "limit": {"type": "integer", "description": "Maximum number of facts to return (default 6, max 50)."},
         },
         "required": ["query"],
     },
@@ -109,10 +123,34 @@ REVISE_SCHEMA = {
 }
 FORGET_SCHEMA = {
     "name": "intelligent_memory_forget",
-    "description": "Archive one fact without deleting its history.",
+    "description": (
+        "Remove one fact from recall. Use mode='archive' to keep history, "
+        "mode='revoke' to hide it reversibly, or mode='erase' to delete its text "
+        "and provenance while keeping an audit tombstone."
+    ),
     "parameters": {
         "type": "object",
-        "properties": {"fact_id": {"type": "integer"}},
+        "properties": {
+            "fact_id": {"type": "integer"},
+            "mode": {
+                "type": "string",
+                "enum": ["archive", "revoke", "erase"],
+                "description": "Removal mode (default: archive).",
+            },
+            "reason": {"type": "string", "description": "Optional audit reason."},
+        },
+        "required": ["fact_id"],
+    },
+}
+RESTORE_SCHEMA = {
+    "name": "intelligent_memory_restore",
+    "description": "Restore a revoked fact to active recall.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "fact_id": {"type": "integer"},
+            "reason": {"type": "string", "description": "Optional audit reason."},
+        },
         "required": ["fact_id"],
     },
 }
@@ -178,9 +216,9 @@ class IntelligentMemoryProvider(MemoryProvider):
         self._closed = False
 
     def _apply_config(self, config: dict[str, Any]) -> None:
-        self.cloud_mode = _cloud_mode(config.get("cloud_mode", "selective"))
-        self.max_recall_facts = max(1, min(50, int(config.get("max_recall_facts", 25))))
-        self.max_recall_chars = max(200, int(config.get("max_recall_chars", 10000)))
+        self.cloud_mode = _cloud_mode(config.get("cloud_mode", "off"))
+        self.max_recall_facts = max(1, min(50, int(config.get("max_recall_facts", 6))))
+        self.max_recall_chars = max(200, int(config.get("max_recall_chars", 1800)))
 
     @staticmethod
     def _register_auxiliary_task() -> None:
@@ -209,7 +247,7 @@ class IntelligentMemoryProvider(MemoryProvider):
     def system_prompt_block(self) -> str:
         return (
             "# Intelligent Memory\n"
-            "Active local-first memory with in-process semantic reranking.\n"
+            "Active local-first memory with in-process lexical reranking.\n"
             "- Save durable facts with `intelligent_memory_remember(content, project, tags, kind)`.\n"
             "- When a conflict warning is returned, inspect the conflicting fact_id and call `intelligent_memory_revise` to replace it.\n"
             "- Deep recall with optional project/kind filters: `intelligent_memory_recall(query, project, kind)`."
@@ -280,6 +318,9 @@ class IntelligentMemoryProvider(MemoryProvider):
                     source="builtin",
                     source_ref=str(metadata.get("session_id") or self.session_id),
                     profile=self.profile,
+                    quote=content,
+                    quote_start=0,
+                    quote_end=len(content),
                     confidence=0.95,
                     importance=0.8,
                     metadata=metadata,
@@ -294,6 +335,9 @@ class IntelligentMemoryProvider(MemoryProvider):
                     source="builtin",
                     source_ref=str(metadata.get("session_id") or self.session_id),
                     profile=self.profile,
+                    quote=content,
+                    quote_start=0,
+                    quote_end=len(content),
                     confidence=0.95,
                     importance=0.8,
                     supersedes_id=old.fact_id if old else None,
@@ -301,7 +345,12 @@ class IntelligentMemoryProvider(MemoryProvider):
                 )
             )
         elif action == "remove" and old_text:
-            self.store.archive_matching(old_text, target=target)
+            self.store.archive_matching(
+                old_text,
+                target=target,
+                reason="builtin memory remove",
+                audit=True,
+            )
 
     def on_delegation(
         self, task: str, result: str, *, child_session_id: str = "", **kwargs: Any
@@ -329,6 +378,7 @@ class IntelligentMemoryProvider(MemoryProvider):
             STATUS_SCHEMA,
             REVISE_SCHEMA,
             FORGET_SCHEMA,
+            RESTORE_SCHEMA,
             FEEDBACK_SCHEMA,
         ]
 
@@ -361,14 +411,16 @@ class IntelligentMemoryProvider(MemoryProvider):
                     else ()
                 )
                 project = str(args.get("project") or "").strip()
+                content_arg = str(args.get("content") or "")
                 result = self.store.remember(
                     FactInput(
-                        content=str(args.get("content") or ""),
+                        content=content_arg,
                         kind=str(args.get("kind") or "general"),
                         target=str(args.get("target") or "memory"),
                         project=project,
                         tags=tags,
                         aliases=aliases,
+                        scope=str(args.get("scope") or "global"),
                         source="provider_tool",
                         source_ref=self.session_id,
                         profile=self.profile,
@@ -405,17 +457,31 @@ class IntelligentMemoryProvider(MemoryProvider):
                 project_arg = str(args["project"]).strip() if args.get("project") else None
                 kind_arg = str(args["kind"]).strip() if args.get("kind") else None
                 target_arg = str(args["target"]).strip() if args.get("target") else None
+                scope_arg = str(args["scope"]).strip() if args.get("scope") else None
                 facts = self.store.search(
                     str(args.get("query") or ""),
                     target=target_arg,
                     project=project_arg,
                     kind=kind_arg,
+                    scope=scope_arg,
                     limit=limit,
                 )
                 return _json(
                     {
                         "success": True,
-                        "facts": [self._fact_payload(fact) for fact in facts],
+                        "facts": [
+                            self._fact_payload(
+                                fact,
+                                sources=[
+                                    provenance
+                                    for provenance in self.store.list_provenance(
+                                        fact.fact_id
+                                    )
+                                    if provenance.quote
+                                ][:3],
+                            )
+                            for fact in facts
+                        ],
                     }
                 )
 
@@ -426,6 +492,7 @@ class IntelligentMemoryProvider(MemoryProvider):
                         "provider": self.name,
                         "profile": self.profile,
                         "active_facts": self.store.active_count(),
+                        "status_counts": self.store.status_counts(),
                         "cloud_mode": self.cloud_mode,
                         "last_cloud_error": self.last_cloud_error,
                     }
@@ -444,9 +511,10 @@ class IntelligentMemoryProvider(MemoryProvider):
                     if isinstance(args.get("tags"), list)
                     else old.tags
                 )
+                content_arg = str(args.get("content") or "")
                 result = self.store.remember(
                     FactInput(
-                        content=str(args.get("content") or ""),
+                        content=content_arg,
                         kind=old.kind,
                         target=old.target,
                         project=project,
@@ -468,8 +536,45 @@ class IntelligentMemoryProvider(MemoryProvider):
 
             if tool_name == "intelligent_memory_forget":
                 fact_id = _required_int(args.get("fact_id"))
-                self.store.archive(fact_id)
-                return _json({"success": True, "done": True, "fact_id": fact_id})
+                mode = str(args.get("mode") or "archive").lower()
+                reason = str(args.get("reason") or "")
+                if mode not in {"archive", "revoke", "erase"}:
+                    return _json(
+                        {
+                            "success": False,
+                            "error": "mode must be archive, revoke, or erase",
+                        }
+                    )
+                if mode == "erase":
+                    fact = self.store.erase(fact_id, reason=reason)
+                elif mode == "revoke":
+                    fact = self.store.revoke(fact_id, reason=reason)
+                else:
+                    self.store.archive(fact_id, reason=reason, audit=True)
+                    fact = self.store.get_fact(fact_id)
+                return _json(
+                    {
+                        "success": True,
+                        "done": True,
+                        "fact_id": fact_id,
+                        "mode": mode,
+                        "status": fact.status.value,
+                    }
+                )
+
+            if tool_name == "intelligent_memory_restore":
+                fact_id = _required_int(args.get("fact_id"))
+                fact = self.store.restore(
+                    fact_id, reason=str(args.get("reason") or "")
+                )
+                return _json(
+                    {
+                        "success": True,
+                        "done": True,
+                        "fact_id": fact_id,
+                        "status": fact.status.value,
+                    }
+                )
 
             if tool_name == "intelligent_memory_feedback":
                 fact_id = _required_int(args.get("fact_id"))
@@ -493,7 +598,7 @@ class IntelligentMemoryProvider(MemoryProvider):
             {
                 "key": "cloud_mode",
                 "description": "Cloud intelligence mode",
-                "default": "selective",
+                "default": "off",
                 "choices": ["off", "selective", "session"],
             }
         ]
@@ -507,18 +612,36 @@ class IntelligentMemoryProvider(MemoryProvider):
             self._closed = True
 
     @staticmethod
-    def _fact_payload(fact: Fact) -> dict[str, Any]:
-        return {
+    def _fact_payload(
+        fact: Fact, *, sources: Sequence[Any] | None = None
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
             "fact_id": fact.fact_id,
             "content": fact.content,
             "kind": fact.kind,
             "target": fact.target,
             "project": fact.project,
+            "scope": fact.scope,
             "tags": list(fact.tags),
             "confidence": fact.confidence,
             "importance": fact.importance,
             "source": fact.source,
+            "source_ref": fact.source_ref,
         }
+        if sources:
+            payload["sources"] = [
+                {
+                    "source": entry.source,
+                    "source_ref": entry.source_ref,
+                    "quote": entry.quote,
+                    "quote_start": entry.quote_start,
+                    "quote_end": entry.quote_end,
+                    "created_at": entry.created_at,
+                }
+                for entry in sources
+                if entry.quote
+            ]
+        return payload
 
 
 def register(ctx: Any) -> None:
@@ -532,6 +655,7 @@ def register(ctx: Any) -> None:
         ("intelligent_memory_status", STATUS_SCHEMA),
         ("intelligent_memory_revise", REVISE_SCHEMA),
         ("intelligent_memory_forget", FORGET_SCHEMA),
+        ("intelligent_memory_restore", RESTORE_SCHEMA),
         ("intelligent_memory_feedback", FEEDBACK_SCHEMA),
     ]
     for name, schema in tools:
@@ -545,8 +669,8 @@ def register(ctx: Any) -> None:
 
 
 def _cloud_mode(value: Any) -> str:
-    candidate = str(value or "selective").lower()
-    return candidate if candidate in {"off", "selective", "session"} else "selective"
+    candidate = str(value or "off").lower()
+    return candidate if candidate in {"off", "selective", "session"} else "off"
 
 
 def _number(value: Any, default: float) -> float:
@@ -577,13 +701,13 @@ def _load_provider_config(hermes_home: Path) -> dict[str, Any]:
         try:
             try:
                 from ruamel.yaml import YAML
-                yaml = YAML(typ="safe")
-                with open(path, "r", encoding="utf-8") as f:
-                    data = yaml.load(f)
+                loader = YAML(typ="safe")
+                with open(path, encoding="utf-8") as f:
+                    data = loader.load(f)
             except ImportError:
-                import yaml
-                with open(path, "r", encoding="utf-8") as f:
-                    data = yaml.safe_load(f)
+                import yaml as pyyaml  # type: ignore[import-untyped]
+                with open(path, encoding="utf-8") as f:
+                    data = pyyaml.safe_load(f)
             if isinstance(data, dict):
                 memory = data.get("memory")
                 if isinstance(memory, dict):

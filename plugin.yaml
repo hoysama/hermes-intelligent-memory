@@ -1,7 +1,7 @@
 name: intelligent_memory
-version: 0.2.0
+version: 0.3.0
 kind: exclusive
-description: "Local-first Arabic/English intelligent memory with canonical facts, conflict lifecycle, bounded recall, and selective Hermes cloud enrichment."
+description: "Local-first Arabic/English intelligent memory with canonical facts, verbatim source quotes, governance audit, bounded lexical recall, and selective Hermes cloud enrichment."
 hooks:
   - on_session_end
   - on_pre_compress
@@ -13,4 +13,5 @@ provides_tools:
   - intelligent_memory_status
   - intelligent_memory_revise
   - intelligent_memory_forget
+  - intelligent_memory_restore
   - intelligent_memory_feedback

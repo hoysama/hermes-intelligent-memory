@@ -1,0 +1,120 @@
+{
+  "name": "arabic-mixed-memory-v1",
+  "description": "Offline retrieval suite for Arabic, English, and mixed technical memory facts.",
+  "facts": [
+    {
+      "id": "billing",
+      "content": "المشروع يستخدم Stripe لمعالجة المدفوعات في بيئة الإنتاج",
+      "kind": "project",
+      "project": "billing",
+      "tags": ["payments", "stripe", "production"],
+      "aliases": ["payment gateway", "بوابة الدفع", "Stripe"]
+    },
+    {
+      "id": "auth",
+      "content": "نظام تسجيل الدخول يعتمد على JWT مع صلاحية قصيرة",
+      "kind": "project",
+      "project": "auth",
+      "tags": ["auth", "jwt", "security"],
+      "aliases": ["login", "تسجيل الدخول", "توثيق"]
+    },
+    {
+      "id": "database",
+      "content": "قاعدة بيانات المشروع هي PostgreSQL مع نسخ احتياطي يومي",
+      "kind": "project",
+      "project": "core-backend",
+      "tags": ["database", "postgres", "backup"],
+      "aliases": ["database", "Postgres", "قاعدة البيانات", "نسخ احتياطي"]
+    },
+    {
+      "id": "deploy",
+      "content": "النشر يتم عبر Cloudflare Workers باستخدام Wrangler",
+      "kind": "project",
+      "project": "infrastructure",
+      "tags": ["deploy", "cloudflare", "wrangler"],
+      "aliases": ["deployment", "ننشر", "نشر", "Cloudflare Workers"]
+    },
+    {
+      "id": "cache",
+      "content": "Redis يُستخدم لتخزين الجلسات المؤقتة",
+      "kind": "project",
+      "project": "infrastructure",
+      "tags": ["cache", "redis", "sessions"],
+      "aliases": ["session cache", "cached sessions", "الجلسات", "Redis"]
+    },
+    {
+      "id": "package-manager",
+      "content": "المستخدم يفضل Bun لإدارة حزم JavaScript",
+      "kind": "preference",
+      "target": "user",
+      "tags": ["bun", "packages", "javascript"],
+      "aliases": ["package manager", "مدير الحزم", "Bun"]
+    },
+    {
+      "id": "meeting",
+      "content": "الاجتماع الأسبوعي يوم الأحد الساعة العاشرة صباحاً",
+      "kind": "fact",
+      "tags": ["meetings", "schedule"],
+      "aliases": ["weekly meeting", "الاجتماع", "الأحد"]
+    },
+    {
+      "id": "frontend",
+      "content": "واجهة المستخدم مبنية باستخدام React وVite",
+      "kind": "project",
+      "project": "frontend-app",
+      "tags": ["frontend", "react", "vite"],
+      "aliases": ["frontend", "الواجهة الأمامية", "React", "Vite"]
+    },
+    {
+      "id": "secrets-rule",
+      "content": "لا تستخدم مفاتيح API داخل الكود المصدري",
+      "kind": "lesson",
+      "target": "user",
+      "tags": ["security", "api-keys", "policy"],
+      "aliases": ["API keys", "مفاتيح API", "secrets", "security policy"]
+    },
+    {
+      "id": "support-sla",
+      "content": "فريق الدعم يرد على تذاكر العملاء خلال 24 ساعة",
+      "kind": "fact",
+      "tags": ["support", "sla", "tickets"],
+      "aliases": ["support", "tickets", "الدعم", "تذاكر"]
+    },
+    {
+      "id": "backup-storage",
+      "content": "تُحفظ النسخ الاحتياطية في Cloudflare R2",
+      "kind": "project",
+      "project": "infrastructure",
+      "tags": ["backup", "r2", "cloudflare"],
+      "aliases": ["backup storage", "النسخ الاحتياطية", "R2"]
+    },
+    {
+      "id": "language-pref",
+      "content": "المستخدم يفضل الردود بالعربية الفصحى المختصرة",
+      "kind": "preference",
+      "target": "user",
+      "tags": ["language", "arabic", "preference"],
+      "aliases": ["language preference", "اللغة", "العربية"]
+    }
+  ],
+  "queries": [
+    {"query": "وش بوابة الدفع المستخدمة؟", "relevant": ["billing"]},
+    {"query": "كيف يتم تسجيل الدخول؟", "relevant": ["auth"]},
+    {"query": "ايش نوع قاعدة البيانات؟", "relevant": ["database"]},
+    {"query": "كيف ننشر المشروع؟", "relevant": ["deploy"]},
+    {"query": "وين نخزن الجلسات المؤقتة؟", "relevant": ["cache"]},
+    {"query": "ايش مدير الحزم المفضل؟", "relevant": ["package-manager"]},
+    {"query": "متى الاجتماع الأسبوعي؟", "relevant": ["meeting"]},
+    {"query": "بأي تقنية الواجهة مبنية؟", "relevant": ["frontend"]},
+    {"query": "هل نضع مفاتيح API في الكود؟", "relevant": ["secrets-rule"]},
+    {"query": "كم بسرعة يرد فريق الدعم؟", "relevant": ["support-sla"]},
+    {"query": "وين النسخ الاحتياطية؟", "relevant": ["backup-storage"]},
+    {"query": "بأي لغة يفضل المستخدم الردود؟", "relevant": ["language-pref"]},
+    {"query": "Which payment gateway is used?", "relevant": ["billing"]},
+    {"query": "Postgres backup schedule?", "relevant": ["database"]},
+    {"query": "Where are sessions cached?", "relevant": ["cache"]},
+    {"query": "مَتَى الاِجْتِمَاع الأُسْبُوعِيّ؟", "relevant": ["meeting"]},
+    {"query": "اين تخزن النسخ الاحتياطيه", "relevant": ["backup-storage"]},
+    {"query": "ما هي تقنية الواجهة الأمامية؟", "relevant": ["frontend"]}
+  ]
+}

@@ -21,11 +21,15 @@ Cloud calls are opt-in by mode. Inputs are candidate facts only, never raw datab
 
 ### Provenance poisoning
 
-Every fact records source, source reference, profile, session, and timestamps. Assistant-inferred facts start below explicit user statements in confidence. Tool output is never promoted to global user preference without explicit confirmation.
+Every fact records source, source reference, profile, session, timestamps, and (when available) a verbatim evidence quote with character offsets. Assistant-inferred facts start below explicit user statements in confidence. Tool output is never promoted to global user preference without explicit confirmation.
+
+### Unwanted retention
+
+`revoke` hides a fact reversibly, `archive` removes it from recall with history intact, and `erase` deletes fact text and provenance rows while keeping only a SHA-256 tombstone hash and an audit entry. Scope labels are retrieval filters; they are not an access-control boundary.
 
 ### Cross-profile bleed
 
-All paths derive from the `hermes_home` argument passed to `initialize`. The database stores a profile scope key and rejects writes whose runtime profile differs from the opened store.
+All paths derive from the `hermes_home` argument passed to `initialize`. The database stores a profile scope key and rejects writes whose runtime profile differs from the opened store. Profiles remain the hard isolation boundary.
 
 ### Stale conflicts
 

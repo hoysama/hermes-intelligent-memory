@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from intelligent_memory.cli import build_parser, run_command
+from intelligent_memory.core.models import FactInput
+from intelligent_memory.core.store import MemoryStore
 
 
 def test_cli_status_and_dry_run_have_machine_readable_exit_codes(tmp_path, capsys) -> None:
@@ -94,3 +96,51 @@ def test_cli_search_export_and_import(tmp_path, capsys) -> None:
     assert run_command(export_md_args) == 0
     assert md_export_file.exists()
     assert "Exported Intelligent Memory Facts" in md_export_file.read_text(encoding="utf-8")
+
+
+def test_cli_provenance_audit_and_sources(tmp_path, capsys) -> None:
+    database = tmp_path / "intelligent_memory" / "memory.db"
+    store = MemoryStore(database, profile="default")
+    fact = store.remember(
+        FactInput(
+            content="بوابة الدفع هي Stripe",
+            source="user",
+            source_ref="session:1",
+            quote="بوابة الدفع هي Stripe",
+            quote_start=0,
+            quote_end=22,
+        )
+    )
+    store.close()
+    parser = build_parser()
+
+    search_args = parser.parse_args(
+        [
+            "search",
+            "Stripe",
+            "--hermes-home",
+            str(tmp_path),
+            "--sources",
+        ]
+    )
+    assert run_command(search_args) == 0
+    search_out = capsys.readouterr().out
+    assert '"quote": "بوابة الدفع هي Stripe"' in search_out
+
+    store = MemoryStore(database, profile="default")
+    store.revoke(fact.fact_id, reason="temporary")
+    store.close()
+
+    provenance_args = parser.parse_args(
+        ["provenance", str(fact.fact_id), "--hermes-home", str(tmp_path)]
+    )
+    assert run_command(provenance_args) == 0
+    provenance_out = capsys.readouterr().out
+    assert "session:1" in provenance_out
+
+    audit_args = parser.parse_args(
+        ["audit", "--fact-id", str(fact.fact_id), "--hermes-home", str(tmp_path)]
+    )
+    assert run_command(audit_args) == 0
+    audit_out = capsys.readouterr().out
+    assert '"action": "revoke"' in audit_out

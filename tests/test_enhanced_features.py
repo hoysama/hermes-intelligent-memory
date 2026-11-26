@@ -2,13 +2,12 @@ import json
 import time
 from pathlib import Path
 
-import pytest
 from intelligent_memory import IntelligentMemoryProvider
 from intelligent_memory.core.models import FactInput, FactStatus
 from intelligent_memory.core.store import MemoryStore
 
 
-def test_in_process_semantic_reranking_accuracy_and_speed(tmp_path: Path) -> None:
+def test_in_process_lexical_reranking_accuracy_and_speed(tmp_path: Path) -> None:
     store = MemoryStore(tmp_path / "memory.db", profile="default")
 
     # Add multiple facts

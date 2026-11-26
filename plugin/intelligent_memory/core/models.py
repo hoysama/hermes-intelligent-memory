@@ -10,6 +10,8 @@ class FactStatus(StrEnum):
     CONFLICTED = "conflicted"
     SUPERSEDED = "superseded"
     ARCHIVED = "archived"
+    REVOKED = "revoked"
+    ERASED = "erased"
     REJECTED = "rejected"
 
 
@@ -28,6 +30,9 @@ class FactInput:
     source: str = "user"
     source_ref: str = ""
     profile: str = "default"
+    quote: str = ""
+    quote_start: int = -1
+    quote_end: int = -1
     confidence: float = 0.5
     importance: float = 0.5
     supersedes_id: int | None = None
@@ -78,4 +83,17 @@ class Provenance:
     source_ref: str
     profile: str
     metadata: dict[str, Any]
+    created_at: str
+    quote: str = ""
+    quote_start: int = -1
+    quote_end: int = -1
+
+
+@dataclass(frozen=True)
+class AuditEntry:
+    audit_id: int
+    fact_id: int
+    action: str
+    reason: str
+    content_hash: str
     created_at: str

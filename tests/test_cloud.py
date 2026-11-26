@@ -67,6 +67,56 @@ def test_analyzer_returns_validated_structured_facts() -> None:
     assert facts[0].confidence == 1.0
 
 
+def test_analyzer_captures_verbatim_evidence_with_offsets() -> None:
+    source = "تذكر أني أفضل Bun لإدارة الحزم"
+    response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content=(
+                        '{"facts":[{"content":"عبدالله يفضل Bun",'
+                        '"kind":"preference","target":"user",'
+                        '"evidence":"أفضل Bun لإدارة الحزم"}]}'
+                    )
+                )
+            )
+        ]
+    )
+    analyzer = CloudMemoryAnalyzer(caller=lambda **_kwargs: response)
+
+    facts = analyzer.extract([{"role": "user", "content": source}])
+
+    assert len(facts) == 1
+    assert facts[0].quote == "أفضل Bun لإدارة الحزم"
+    assert facts[0].quote_start == source.find("أفضل Bun لإدارة الحزم")
+    assert facts[0].quote_end == source.find("أفضل Bun لإدارة الحزم") + len(
+        "أفضل Bun لإدارة الحزم"
+    )
+
+
+def test_analyzer_discards_evidence_not_present_in_source() -> None:
+    response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content=(
+                        '{"facts":[{"content":"عبدالله يفضل Bun",'
+                        '"evidence":"اقتباس غير موجود"}]}'
+                    )
+                )
+            )
+        ]
+    )
+    analyzer = CloudMemoryAnalyzer(caller=lambda **_kwargs: response)
+
+    facts = analyzer.extract([{"role": "user", "content": "تذكر أني أفضل Bun"}])
+
+    assert len(facts) == 1
+    assert facts[0].quote == ""
+    assert facts[0].quote_start == -1
+    assert facts[0].quote_end == -1
+
+
 def test_analyzer_rejects_invalid_or_oversized_model_output() -> None:
     invalid = SimpleNamespace(
         choices=[SimpleNamespace(message=SimpleNamespace(content='{"facts":[{"content":""}]}'))]

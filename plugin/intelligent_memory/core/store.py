@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import sqlite3
 import threading
+from dataclasses import replace
 from pathlib import Path
 
-from .models import Fact, FactInput, FactStatus, Provenance, RememberResult
+from .models import AuditEntry, Fact, FactInput, FactStatus, Provenance, RememberResult
 from .normalize import character_ngrams, jaccard, normalize_text, tokens
 
 _SCHEMA = """
@@ -51,11 +53,25 @@ CREATE TABLE IF NOT EXISTS fact_provenance (
     source_ref TEXT NOT NULL DEFAULT '',
     profile TEXT NOT NULL,
     metadata_json TEXT NOT NULL DEFAULT '{}',
+    quote TEXT NOT NULL DEFAULT '',
+    quote_start INTEGER NOT NULL DEFAULT -1,
+    quote_end INTEGER NOT NULL DEFAULT -1,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_provenance_fact ON fact_provenance(fact_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_provenance_identity
     ON fact_provenance(fact_id, source, source_ref, metadata_json);
+CREATE TABLE IF NOT EXISTS fact_audit (
+    audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fact_id INTEGER NOT NULL,
+    profile TEXT NOT NULL,
+    action TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    content_hash TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_fact_audit_fact ON fact_audit(fact_id);
+CREATE INDEX IF NOT EXISTS idx_fact_audit_profile ON fact_audit(profile, created_at);
 """
 
 
@@ -92,11 +108,28 @@ class MemoryStore:
             "conflicts_with_id": "INTEGER REFERENCES facts(fact_id)",
             "project": "TEXT NOT NULL DEFAULT ''",
             "tags_json": "TEXT NOT NULL DEFAULT '[]'",
+            "scope": "TEXT NOT NULL DEFAULT 'global'",
         }
         for column, declaration in migrations.items():
             if column not in columns:
                 self._connection.execute(
                     f"ALTER TABLE facts ADD COLUMN {column} {declaration}"
+                )
+        provenance_columns = {
+            str(row["name"])
+            for row in self._connection.execute(
+                "PRAGMA table_info(fact_provenance)"
+            ).fetchall()
+        }
+        provenance_migrations = {
+            "quote": "TEXT NOT NULL DEFAULT ''",
+            "quote_start": "INTEGER NOT NULL DEFAULT -1",
+            "quote_end": "INTEGER NOT NULL DEFAULT -1",
+        }
+        for column, declaration in provenance_migrations.items():
+            if column not in provenance_columns:
+                self._connection.execute(
+                    f"ALTER TABLE fact_provenance ADD COLUMN {column} {declaration}"
                 )
         self._connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_facts_profile_project ON facts(profile, project)"
@@ -163,6 +196,8 @@ class MemoryStore:
         aliases = tuple(dict.fromkeys(alias.strip() for alias in item.aliases if alias.strip()))
         tags = tuple(dict.fromkeys(tag.strip() for tag in item.tags if tag.strip()))
         project = item.project.strip()
+        scope = (item.scope or "global").strip()[:64] or "global"
+        item = replace(item, project=project, scope=scope, aliases=aliases, tags=tags)
 
         with self._lock:
             existing = self._connection.execute(
@@ -201,10 +236,10 @@ class MemoryStore:
                     supersedes_id = structured_conflict.fact_id
 
             if supersedes_id is None and conflict_fact is None:
-                semantic_conflict = self._find_semantic_conflict(item, normalized)
-                if semantic_conflict is not None:
-                    conflict_fact = semantic_conflict
-                    conflicts_with_id = semantic_conflict.fact_id
+                lexical_conflict = self._find_lexical_conflict(item, normalized)
+                if lexical_conflict is not None:
+                    conflict_fact = lexical_conflict
+                    conflicts_with_id = lexical_conflict.fact_id
 
             now = self._connection.execute("SELECT CURRENT_TIMESTAMP").fetchone()[0]
             cursor = self._connection.execute(
@@ -261,13 +296,122 @@ class MemoryStore:
             raise KeyError(f"unknown fact_id: {fact_id}")
         return self._row_to_fact(row)
 
-    def archive(self, fact_id: int) -> None:
+    def archive(self, fact_id: int, *, reason: str = "", audit: bool = False) -> None:
         with self._lock:
             self._connection.execute(
                 "UPDATE facts SET status = ?, updated_at = CURRENT_TIMESTAMP "
                 "WHERE fact_id = ? AND profile = ?",
                 (FactStatus.ARCHIVED.value, fact_id, self.profile),
             )
+            if audit:
+                self._audit(fact_id, "archive", reason, "")
+
+    def revoke(self, fact_id: int, *, reason: str = "") -> Fact:
+        """Hide a fact from recall immediately while keeping the record recoverable."""
+        with self._lock:
+            fact = self.get_fact(fact_id)
+            if fact.status is FactStatus.ERASED:
+                raise ValueError("erased facts cannot be revoked")
+            self._connection.execute(
+                "UPDATE facts SET status = ?, updated_at = CURRENT_TIMESTAMP "
+                "WHERE fact_id = ? AND profile = ?",
+                (FactStatus.REVOKED.value, fact_id, self.profile),
+            )
+            self._audit(fact_id, "revoke", reason, "")
+            return self.get_fact(fact_id)
+
+    def restore(self, fact_id: int, *, reason: str = "") -> Fact:
+        """Restore a revoked fact to active recall."""
+        with self._lock:
+            fact = self.get_fact(fact_id)
+            if fact.status is not FactStatus.REVOKED:
+                raise ValueError("only revoked facts can be restored")
+            self._connection.execute(
+                "UPDATE facts SET status = ?, updated_at = CURRENT_TIMESTAMP "
+                "WHERE fact_id = ? AND profile = ?",
+                (FactStatus.ACTIVE.value, fact_id, self.profile),
+            )
+            self._audit(fact_id, "restore", reason, "")
+            return self.get_fact(fact_id)
+
+    def erase(self, fact_id: int, *, reason: str = "") -> Fact:
+        """Erase fact text and provenance, keeping an audit tombstone hash only."""
+        with self._lock:
+            fact = self.get_fact(fact_id)
+            if fact.status is FactStatus.ERASED:
+                return fact
+            tombstone = hashlib.sha256(
+                normalize_text(fact.content).encode("utf-8")
+            ).hexdigest()
+            self._connection.execute(
+                """UPDATE facts
+                SET content = '[erased]', normalized_content = '', content_hash = ?,
+                    aliases_json = '[]', tags_json = '[]', subject = '', predicate = '',
+                    value = '', project = '', source_ref = '', status = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE fact_id = ? AND profile = ?""",
+                (
+                    f"erased:{fact_id}",
+                    FactStatus.ERASED.value,
+                    fact_id,
+                    self.profile,
+                ),
+            )
+            self._connection.execute(
+                "DELETE FROM fact_provenance WHERE fact_id = ?", (fact_id,)
+            )
+            self._audit(fact_id, "erase", reason, tombstone)
+            return self.get_fact(fact_id)
+
+    def list_audit(
+        self, *, fact_id: int | None = None, limit: int = 100
+    ) -> list[AuditEntry]:
+        params: list[object] = [self.profile]
+        clause = ""
+        if fact_id is not None:
+            clause = " AND fact_id = ?"
+            params.append(int(fact_id))
+        params.append(max(1, int(limit)))
+        rows = self._connection.execute(
+            f"""SELECT * FROM fact_audit
+            WHERE profile = ?{clause}
+            ORDER BY audit_id DESC LIMIT ?""",
+            params,
+        ).fetchall()
+        return [
+            AuditEntry(
+                audit_id=int(row["audit_id"]),
+                fact_id=int(row["fact_id"]),
+                action=str(row["action"]),
+                reason=str(row["reason"]),
+                content_hash=str(row["content_hash"]),
+                created_at=str(row["created_at"]),
+            )
+            for row in rows
+        ]
+
+    def status_counts(self) -> dict[str, int]:
+        rows = self._connection.execute(
+            "SELECT status, COUNT(*) AS total FROM facts WHERE profile = ? GROUP BY status",
+            (self.profile,),
+        ).fetchall()
+        return {str(row["status"]): int(row["total"]) for row in rows}
+
+    def _audit(
+        self, fact_id: int, action: str, reason: str = "", content_hash: str = ""
+    ) -> None:
+        self._connection.execute(
+            """INSERT INTO fact_audit
+            (fact_id, profile, action, reason, content_hash)
+            VALUES (?, ?, ?, ?, ?)""",
+            (
+                fact_id,
+                self.profile,
+                action,
+                reason.strip(),
+                content_hash,
+            ),
+        )
 
     def record_feedback(self, fact_id: int, *, helpful: bool) -> Fact:
         """Record explicit usefulness feedback and adjust confidence."""
@@ -293,12 +437,19 @@ class MemoryStore:
                 )
             return self.get_fact(fact_id)
 
-    def archive_matching(self, old_text: str, *, target: str | None = None) -> int | None:
+    def archive_matching(
+        self,
+        old_text: str,
+        *,
+        target: str | None = None,
+        reason: str = "",
+        audit: bool = False,
+    ) -> int | None:
         """Archive the best active fact containing a normalized text fragment."""
         match = self.find_active_by_fragment(old_text, target=target)
         if match is None:
             return None
-        self.archive(match.fact_id)
+        self.archive(match.fact_id, reason=reason, audit=audit)
         return match.fact_id
 
     def find_active_by_fragment(self, old_text: str, *, target: str | None = None) -> Fact | None:
@@ -325,13 +476,22 @@ class MemoryStore:
         ).fetchone()
         return int(row[0])
 
-    def list_active(self, *, target: str | None = None, limit: int = 1_000) -> list[Fact]:
+    def list_active(
+        self,
+        *,
+        target: str | None = None,
+        scope: str | None = None,
+        limit: int = 1_000,
+    ) -> list[Fact]:
         """List active profile facts in projection priority order."""
         params: list[object] = [self.profile, FactStatus.ACTIVE.value]
         target_clause = ""
         if target:
             target_clause = " AND target = ?"
             params.append(target)
+        if scope:
+            target_clause += " AND scope = ?"
+            params.append(scope.strip())
         params.append(max(1, int(limit)))
         rows = self._connection.execute(
             f"""SELECT * FROM facts
@@ -347,9 +507,10 @@ class MemoryStore:
         *,
         status: FactStatus | str | None = None,
         target: str | None = None,
+        scope: str | None = None,
         limit: int = 1_000,
     ) -> list[Fact]:
-        """List facts with optional status and target filters across all lifecycle states."""
+        """List facts with optional lifecycle, target, and scope filters."""
         params: list[object] = [self.profile]
         clauses = ["profile = ?"]
         if status is not None:
@@ -359,6 +520,9 @@ class MemoryStore:
         if target:
             clauses.append("target = ?")
             params.append(target)
+        if scope:
+            clauses.append("scope = ?")
+            params.append(scope.strip())
         params.append(max(1, int(limit)))
         query = f"""SELECT * FROM facts
         WHERE {' AND '.join(clauses)}
@@ -469,9 +633,10 @@ class MemoryStore:
         target: str | None = None,
         project: str | None = None,
         kind: str | None = None,
+        scope: str | None = None,
         limit: int = 8,
     ) -> list[Fact]:
-        """In-process high-speed semantic reranking over SQLite candidates in < 1ms."""
+        """In-process hybrid lexical reranking over SQLite candidates in < 1ms."""
         if limit < 1:
             return []
         query_tokens = tokens(query)
@@ -484,6 +649,7 @@ class MemoryStore:
                 target=target,
                 project=project,
                 kind=kind,
+                scope=scope,
                 limit=max(limit * 8, 32),
             )
             scored: list[tuple[float, Fact]] = []
@@ -498,7 +664,7 @@ class MemoryStore:
                 if clean_kind and fact.kind != clean_kind:
                     continue
 
-                score = self._compute_semantic_score(
+                score = self._compute_lexical_score(
                     normalized_query=normalized_query,
                     query_tokens=query_tokens,
                     query_ngrams=query_ngrams,
@@ -517,7 +683,7 @@ class MemoryStore:
             return top_facts
 
     @staticmethod
-    def _compute_semantic_score(
+    def _compute_lexical_score(
         *,
         normalized_query: str,
         query_tokens: set[str],
@@ -596,6 +762,9 @@ class MemoryStore:
                 profile=row["profile"],
                 metadata=json.loads(row["metadata_json"]),
                 created_at=row["created_at"],
+                quote=str(row["quote"] or ""),
+                quote_start=int(row["quote_start"]),
+                quote_end=int(row["quote_end"]),
             )
             for row in rows
         ]
@@ -604,9 +773,15 @@ class MemoryStore:
         """Merge wording variants without merging corrections or negations."""
         rows = self._connection.execute(
             """SELECT * FROM facts
-            WHERE profile = ? AND status = ? AND kind = ? AND target = ?
+            WHERE profile = ? AND status = ? AND kind = ? AND target = ? AND scope = ?
             ORDER BY fact_id DESC LIMIT 200""",
-            (self.profile, FactStatus.ACTIVE.value, item.kind, item.target),
+            (
+                self.profile,
+                FactStatus.ACTIVE.value,
+                item.kind,
+                item.target,
+                item.scope,
+            ),
         ).fetchall()
         incoming_tokens = tokens(normalized)
         incoming_ngrams = character_ngrams(normalized)
@@ -632,10 +807,16 @@ class MemoryStore:
             return None
         rows = self._connection.execute(
             """SELECT * FROM facts
-            WHERE profile = ? AND status = ?
+            WHERE profile = ? AND status = ? AND scope = ?
               AND subject = ? AND predicate = ?
             ORDER BY confidence DESC, fact_id DESC""",
-            (self.profile, FactStatus.ACTIVE.value, item.subject, item.predicate),
+            (
+                self.profile,
+                FactStatus.ACTIVE.value,
+                item.scope,
+                item.subject,
+                item.predicate,
+            ),
         ).fetchall()
         for row in rows:
             fact = self._row_to_fact(row)
@@ -643,7 +824,7 @@ class MemoryStore:
                 return fact
         return None
 
-    def _find_semantic_conflict(self, item: FactInput, normalized: str) -> Fact | None:
+    def _find_lexical_conflict(self, item: FactInput, normalized: str) -> Fact | None:
         negation_words = {"لا", "ليس", "لن", "لم", "ممنوع", "never", "not", "no", "dont"}
         stop_words = {
             "في", "من", "على", "الى", "إلى", "عن", "مع", "هذا", "هذه", "ذلك", "تلك",
@@ -659,9 +840,14 @@ class MemoryStore:
 
         rows = self._connection.execute(
             """SELECT * FROM facts
-            WHERE profile = ? AND status = ? AND target = ?
+            WHERE profile = ? AND status = ? AND target = ? AND scope = ?
             ORDER BY fact_id DESC LIMIT 200""",
-            (self.profile, FactStatus.ACTIVE.value, item.target),
+            (
+                self.profile,
+                FactStatus.ACTIVE.value,
+                item.target,
+                item.scope,
+            ),
         ).fetchall()
 
         best: tuple[float, Fact] | None = None
@@ -700,6 +886,7 @@ class MemoryStore:
         target: str | None = None,
         project: str | None = None,
         kind: str | None = None,
+        scope: str | None = None,
         limit: int = 64,
     ) -> list[sqlite3.Row]:
         normalized = normalize_text(query)
@@ -714,47 +901,89 @@ class MemoryStore:
         if kind:
             extra_clauses.append("f.kind = ?")
             params.append(kind.strip())
+        if scope:
+            extra_clauses.append("f.scope = ?")
+            params.append(scope.strip())
 
         extra_sql = (" AND " + " AND ".join(extra_clauses)) if extra_clauses else ""
         query_words = [t for t in tokens(query) if len(t) >= 2]
+        combined: list[sqlite3.Row] = []
+        seen: set[int] = set()
 
         try:
             if query_words:
                 match = " OR ".join(f'"{token}"' for token in query_words)
                 fts_params = list(params)
                 fts_params.extend([match, limit])
-                rows = self._connection.execute(
+                for row in self._connection.execute(
                     f"""SELECT f.* FROM facts f JOIN facts_fts ON facts_fts.rowid = f.fact_id
                     WHERE f.profile = ? AND f.status = ? {extra_sql}
                     AND facts_fts MATCH ? LIMIT ?""",
                     fts_params,
-                ).fetchall()
-                if rows:
-                    return rows
+                ).fetchall():
+                    fact_id = int(row["fact_id"])
+                    if fact_id not in seen:
+                        seen.add(fact_id)
+                        combined.append(row)
         except sqlite3.OperationalError:
             pass
 
-        like = f"%{normalized}%"
+        fallback_clauses: list[str] = []
         fallback_params = list(params)
-        fallback_params.extend([like, like, like, like, like, limit])
-        return self._connection.execute(
-            f"""SELECT * FROM facts f WHERE f.profile = ? AND f.status = ? {extra_sql}
-            AND (f.normalized_content LIKE ? OR f.aliases_json LIKE ? OR f.value LIKE ?
-                 OR f.project LIKE ? OR f.tags_json LIKE ?) LIMIT ?""",
-            fallback_params,
-        ).fetchall()
+        fallback_tokens = query_words[:40] or ([normalized] if normalized else [])
+        for token in fallback_tokens:
+            like = f"%{token}%"
+            fallback_clauses.append(
+                "(f.normalized_content LIKE ? OR f.aliases_json LIKE ? OR f.value LIKE ? "
+                "OR f.project LIKE ? OR f.tags_json LIKE ?)"
+            )
+            fallback_params.extend([like, like, like, like, like])
+        if fallback_clauses and len(combined) < limit:
+            fallback_params.append(limit)
+            fallback_rows = self._connection.execute(
+                f"""SELECT * FROM facts f
+                WHERE f.profile = ? AND f.status = ? {extra_sql}
+                AND ({' OR '.join(fallback_clauses)})
+                ORDER BY f.importance DESC, f.confidence DESC, f.fact_id DESC
+                LIMIT ?""",
+                fallback_params,
+            ).fetchall()
+            for row in fallback_rows:
+                fact_id = int(row["fact_id"])
+                if fact_id not in seen:
+                    seen.add(fact_id)
+                    combined.append(row)
+
+        return combined[:limit]
 
     def _add_provenance(self, fact_id: int, item: FactInput) -> None:
+        quote = str(item.quote or "")
+        start = int(item.quote_start)
+        end = int(item.quote_end)
+        if not quote.strip():
+            quote, start, end = "", -1, -1
+        else:
+            if len(quote) > 2_000:
+                quote = quote[:2_000]
+                end = min(end, 2_000) if end >= 0 else -1
+            if start < 0:
+                start = 0
+            if end <= start:
+                end = len(quote)
         self._connection.execute(
             """INSERT OR IGNORE INTO fact_provenance
-            (fact_id, source, source_ref, profile, metadata_json)
-            VALUES (?, ?, ?, ?, ?)""",
+            (fact_id, source, source_ref, profile, metadata_json,
+             quote, quote_start, quote_end)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 fact_id,
                 item.source,
                 item.source_ref,
                 item.profile,
                 json.dumps(item.metadata, ensure_ascii=False),
+                quote,
+                start,
+                end,
             ),
         )
 

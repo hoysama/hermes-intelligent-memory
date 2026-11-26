@@ -31,7 +31,22 @@ def build_parser(parser: argparse.ArgumentParser | None = None) -> argparse.Argu
     search.add_argument("--target", choices=["memory", "user"], default=None)
     search.add_argument("--project", type=str, default=None, help="Filter by project")
     search.add_argument("--kind", type=str, default=None, help="Filter by kind")
-    search.add_argument("--limit", type=int, default=8)
+    search.add_argument("--scope", type=str, default=None, help="Filter by scope")
+    search.add_argument(
+        "--sources", action="store_true", help="Include provenance quotes in results"
+    )
+    search.add_argument("--limit", type=int, default=6)
+
+    provenance = subparsers.add_parser(
+        "provenance", help="Show provenance quotes for one fact"
+    )
+    provenance.add_argument("fact_id", type=int)
+    provenance.add_argument("--hermes-home", type=Path, default=None)
+
+    audit = subparsers.add_parser("audit", help="Show governance audit history")
+    audit.add_argument("--hermes-home", type=Path, default=None)
+    audit.add_argument("--fact-id", type=int, default=None)
+    audit.add_argument("--limit", type=int, default=100)
 
     export = subparsers.add_parser("export")
     export.add_argument("--hermes-home", type=Path, default=None)
@@ -43,11 +58,22 @@ def build_parser(parser: argparse.ArgumentParser | None = None) -> argparse.Argu
     )
     export.add_argument(
         "--status",
-        choices=["active", "archived", "superseded", "all"],
+        choices=[
+            "active",
+            "archived",
+            "superseded",
+            "revoked",
+            "erased",
+            "all",
+        ],
         default="active",
         help="Filter by fact lifecycle status",
     )
     export.add_argument("--target", choices=["memory", "user"], default=None)
+    export.add_argument("--scope", type=str, default=None, help="Filter by scope")
+    export.add_argument(
+        "--sources", action="store_true", help="Include provenance quotes"
+    )
     export.add_argument(
         "--output", type=Path, default=None, help="Output destination file (default: stdout)"
     )
@@ -82,6 +108,7 @@ def run_command(args: argparse.Namespace) -> int:
                     "provider": "intelligent_memory",
                     "database": str(database),
                     "active_facts": store.active_count(),
+                    "status_counts": store.status_counts(),
                 }
             )
             return 0
@@ -108,21 +135,68 @@ def run_command(args: argparse.Namespace) -> int:
             _print_json({"restored": True, "backup": str(args.backup)})
             return 0
         if args.command == "search":
-            facts = store.search(args.query, target=args.target, project=args.project, kind=args.kind, limit=args.limit)
+            facts = store.search(
+                args.query,
+                target=args.target,
+                project=args.project,
+                kind=args.kind,
+                scope=args.scope,
+                limit=args.limit,
+            )
             _print_json(
                 {
                     "query": args.query,
                     "count": len(facts),
-                    "results": [fact.__dict__ for fact in facts],
+                    "results": [
+                        _serialize_fact(fact, store, include_sources=args.sources)
+                        for fact in facts
+                    ],
+                }
+            )
+            return 0
+        if args.command == "provenance":
+            try:
+                fact = store.get_fact(args.fact_id)
+            except KeyError:
+                _print_json({"error": f"unknown fact_id: {args.fact_id}"})
+                return 1
+            _print_json(
+                {
+                    "fact_id": fact.fact_id,
+                    "content": fact.content,
+                    "status": fact.status.value,
+                    "sources": [
+                        provenance.__dict__
+                        for provenance in store.list_provenance(fact.fact_id)
+                    ],
+                }
+            )
+            return 0
+        if args.command == "audit":
+            entries = store.list_audit(
+                fact_id=args.fact_id, limit=args.limit
+            )
+            _print_json(
+                {
+                    "count": len(entries),
+                    "entries": [entry.__dict__ for entry in entries],
                 }
             )
             return 0
         if args.command == "export":
             status_filter = None if args.status == "all" else args.status
-            facts = store.list_facts(status=status_filter, target=args.target, limit=10_000)
+            facts = store.list_facts(
+                status=status_filter,
+                target=args.target,
+                scope=args.scope,
+                limit=10_000,
+            )
             if args.format == "json":
                 serialized = json.dumps(
-                    [fact.__dict__ for fact in facts],
+                    [
+                        _serialize_fact(fact, store, include_sources=args.sources)
+                        for fact in facts
+                    ],
                     ensure_ascii=False,
                     indent=2,
                     default=str,
@@ -149,6 +223,19 @@ def run_command(args: argparse.Namespace) -> int:
                             "importance": fact.importance,
                             "status": fact.status.value,
                             "created_at": fact.created_at,
+                            **(
+                                {
+                                    "sources": [
+                                        provenance.__dict__
+                                        for provenance in store.list_provenance(
+                                            fact.fact_id
+                                        )
+                                        if provenance.quote
+                                    ]
+                                }
+                                if args.sources
+                                else {}
+                            ),
                         }
                         for fact in facts
                     ],
@@ -164,6 +251,13 @@ def run_command(args: argparse.Namespace) -> int:
                     if fact.subject or fact.predicate or fact.value:
                         triple = f"`{fact.subject}` -> `{fact.predicate}` -> `{fact.value}`"
                         lines.append(f"  - Structured: {triple}")
+                    if args.sources:
+                        for provenance in store.list_provenance(fact.fact_id):
+                            if provenance.quote:
+                                lines.append(
+                                    f"  - Source: `{provenance.source_ref or provenance.source}`: "
+                                    f"\"{provenance.quote}\""
+                                )
                 serialized = "\n".join(lines) + "\n"
 
             if args.output:
@@ -205,8 +299,12 @@ def run_command(args: argparse.Namespace) -> int:
                                     subject=str(item.get("subject") or ""),
                                     predicate=str(item.get("predicate") or ""),
                                     value=str(item.get("value") or ""),
+                                    scope=str(item.get("scope") or "global"),
                                     source="cli_import",
                                     profile=_profile_name(),
+                                    quote=content_str,
+                                    quote_start=0,
+                                    quote_end=len(content_str),
                                 )
                             )
                             imported += 1
@@ -226,6 +324,9 @@ def run_command(args: argparse.Namespace) -> int:
                                     target=args.target,
                                     source="cli_import",
                                     profile=_profile_name(),
+                                    quote=text_fact,
+                                    quote_start=0,
+                                    quote_end=len(text_fact),
                                 )
                             )
                             imported += 1
@@ -261,6 +362,19 @@ def _profile_name() -> str:
         return str(get_active_profile_name())
     except Exception:
         return "default"
+
+
+def _serialize_fact(
+    fact: Any, store: MemoryStore, *, include_sources: bool
+) -> dict[str, Any]:
+    payload = dict(fact.__dict__)
+    if include_sources:
+        payload["sources"] = [
+            provenance.__dict__
+            for provenance in store.list_provenance(fact.fact_id)
+            if provenance.quote
+        ]
+    return payload
 
 
 def _print_json(payload: dict[str, Any]) -> None:

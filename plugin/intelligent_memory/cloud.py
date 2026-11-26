@@ -64,10 +64,12 @@ class CloudMemoryAnalyzer:
                     "role": "user",
                     "content": (
                         "Return {\"facts\":[...]} where each fact has content, kind, "
-                        "target, subject, predicate, value, aliases, confidence, importance. "
-                        "Use subject/predicate/value only when the fact has a clear structured "
-                        "identity; otherwise use empty strings. Maximum "
-                        f"{self.max_facts} facts.\n\nUNTRUSTED CONVERSATION DATA:\n{text}"
+                        "target, subject, predicate, value, aliases, confidence, importance, "
+                        "and evidence. evidence must be an exact verbatim substring of the "
+                        "conversation that supports the fact. Use subject/predicate/value only "
+                        "when the fact has a clear structured identity; otherwise use empty "
+                        f"strings. Maximum {self.max_facts} facts.\n\n"
+                        f"UNTRUSTED CONVERSATION DATA:\n{text}"
                     ),
                 },
             ],
@@ -77,7 +79,7 @@ class CloudMemoryAnalyzer:
             extra_body={"response_format": {"type": "json_object"}},
         )
         payload = self._response_payload(response)
-        return self._validate_payload(payload)
+        return self._validate_payload(payload, source_text=text)
 
     def _select_user_text(self, messages: Sequence[dict[str, Any]]) -> str:
         parts: list[str] = []
@@ -113,7 +115,9 @@ class CloudMemoryAnalyzer:
         except (AttributeError, IndexError, TypeError, json.JSONDecodeError):
             return {}
 
-    def _validate_payload(self, payload: dict[str, Any]) -> list[FactInput]:
+    def _validate_payload(
+        self, payload: dict[str, Any], *, source_text: str = ""
+    ) -> list[FactInput]:
         raw_facts = payload.get("facts")
         if not isinstance(raw_facts, list):
             return []
@@ -140,6 +144,9 @@ class CloudMemoryAnalyzer:
             subject = _bounded_text(raw.get("subject"), 160)
             predicate = _bounded_text(raw.get("predicate"), 120)
             value = _bounded_text(raw.get("value"), 300)
+            quote, quote_start, quote_end = _evidence(
+                raw.get("evidence"), source_text
+            )
             facts.append(
                 FactInput(
                     content=content,
@@ -150,11 +157,28 @@ class CloudMemoryAnalyzer:
                     value=value,
                     aliases=aliases[:12],
                     source="cloud_extraction",
+                    quote=quote,
+                    quote_start=quote_start,
+                    quote_end=quote_end,
                     confidence=_score(raw.get("confidence"), default=0.6),
                     importance=_score(raw.get("importance"), default=0.5),
                 )
             )
         return facts
+
+
+def _evidence(value: Any, source_text: str) -> tuple[str, int, int]:
+    if not isinstance(value, str) or not source_text:
+        return "", -1, -1
+    quote = value
+    if not quote.strip() or len(quote) > 1_200:
+        return "", -1, -1
+    if redact_sensitive_text(quote) != quote:
+        return "", -1, -1
+    start = source_text.find(quote)
+    if start < 0:
+        return "", -1, -1
+    return quote, start, start + len(quote)
 
 
 def _score(value: Any, *, default: float) -> float:

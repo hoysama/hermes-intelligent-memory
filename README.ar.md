@@ -13,7 +13,7 @@
 
 مشروع **`hermes-intelligent-memory`** هو محرك ذاكرة ذكي محلي أولياً (`Local-First`) ومصمم خصيصاً لدعم **اللغة العربية والمحتوى متعدد اللغات** كخيار رئيسي لوكيل **Hermes Agent**.
 
-يوفر النظام استرجاعاً فوريًا وسريعاً بدون أي تأخير، مع تتبع كامل لأصل وسجل الذاكرة (`Append-Only Provenance`) والمزامنة الآمنة مع ملفات التراكم السريعة `MEMORY.md` و `USER.md`.
+يوفر النظام استرجاعاً فوريًا وسريعاً بدون أي تأخير، مع تتبع كامل لأصل وسجل الذاكرة (`Append-Only Provenance` باستثناء المحو الصريح) والمزامنة الآمنة مع ملفات التراكم السريعة `MEMORY.md` و `USER.md`.
 
 ---
 
@@ -21,10 +21,13 @@
 
 1. **🇸🇦 دعم عربي متقدم جداً:** يعتمد على التفكيك اللغوي، التداخل اللفظي (`Token Overlap`)، وتقنية الـ `Character Trigrams` للبحث والتعرف على المستندات والكلمات العربية والمركبة بدقة فائقة.
 2. **⚡ استرجاع محلي بدون تأخير (Zero-Latency):** الاستعلام والبحث يتمان 100% محلياً عبر داتابيز SQLite في نمط الـ `WAL` وفهارس `FTS5` دون الاعتماد على السحابة في المسار السريع.
-3. **📜 دورة حياة وحفظ أصل الذاكرة:** تتبع دقيق لجميع حالات الذاكرة (`active`, `superseded`, `archived`, `rejected`) لمنع التعارض أو فقدان التاريخ السلسلي.
+3. **📜 دورة حياة وحفظ أصل الذاكرة:** تتبع دقيق لجميع حالات الذاكرة (`active`, `superseded`, `archived`, `revoked`, `erased`, `rejected`) مع سجل تدقيق للعمليات.
 4. **🔄 المزامنة التلقائية للملفات:** كتابة وتزكية الحقائق الهامة تلقائياً بداخل ملفات `MEMORY.md` و `USER.md` باستخدام عمليات كتابة ذرية وبسجلات احتياطية.
-5. **🔒 عزل البروفايلات:** تخزين مستقل لكل بروفايل تحت المسار الخفي `$HERMES_HOME/intelligent_memory/memory.db`.
+5. **🔒 عزل البروفايلات:** تخزين مستقل لكل بروفايل تحت المسار الخفي `$HERMES_HOME/intelligent_memory/memory.db`؛ وتسميات `scope` تضيف تصفية أضيق فوق العزل.
 6. **🛠️ أدوات محرك هرمس:** دعم كامل لأدوات الذاكرة الذكية المستقلة في التلغرام والـ CLI.
+7. **🧾 اقتباسات مصدر حرفية:** كل حقيقة تحتفظ بنص الاقتباس وإزاحات (`offsets`) المصدر، ويمكن عرضها عبر أداة الاسترجاع أو CLI.
+8. **🛡️ حاكمية الذاكرة:** `revoke` قابل للتراجع، و`archive` موثّق، و`erase` يحذف النص وprovenance ويبقي بصمة SHA-256 في سجل التدقيق.
+9. **🧪 تقييمات محلية:** حزمة عربية/مختلطة حتمية بلا شبكة، مع محوّل JSONL خارجي لتنسيقات LoCoMo/LongMemEval بعد تحويلها محلياً.
 
 ---
 
@@ -38,7 +41,7 @@ graph TD
     B --> E[Projection Engine]
     E --> F[MEMORY.md]
     E --> G[USER.md]
-    B -.->|Selective Async| H[Cloud Inference / Reranking]
+    B -.->|Selective Async| H[Selective Cloud Extraction]
 ```
 
 ---
@@ -90,8 +93,9 @@ memory:
 | `intelligent_memory_remember` | حفظ حقيقة هيكلية دائمة بداخل الذاكرة الذكية |
 | `intelligent_memory_recall` | البحث عن الحقائق النشطة المتعلقة باستعلام معين |
 | `intelligent_memory_revise` | تعديل حقيقة سابقة مع حفظ تاريخ السجل |
-| `intelligent_memory_forget` | أرشفة حقيقة دون حذف تاريخها السلسلي |
-| `intelligent_memory_status` | تقرير عن حالة نظام الذاكرة وعدد الحقائق |
+| `intelligent_memory_forget` | أرشفة أو إخفاء أو محو حقيقة (المحو يبقي بصمة تدقيق فقط) |
+| `intelligent_memory_restore` | إعادة حقيقة مُخفاة (revoked) إلى الاسترجاع النشط |
+| `intelligent_memory_status` | تقرير عن حالة نظام الذاكرة وعدد الحقائق لكل حالة |
 | `intelligent_memory_feedback` | تسجيل تقييم فائدة الحقائق المسترجعة لتطوير النتائج |
 
 ---
@@ -101,11 +105,15 @@ memory:
 إدارة، بحث، تصدير، واستيراد ذكرياتك مباشرة من الطرفية دون الحاجة لتشغيل منصة هرمس:
 
 ```bash
-# البحث الدلالي المباشر في الحقائق النشطة
-python -m intelligent_memory.cli search "تقنيات المشروع"
+# البحث المعجمي المباشر في الحقائق النشطة مع اقتباسات المصدر
+python -m intelligent_memory.cli search "تقنيات المشروع" --sources
+
+# عرض المصادر وسجل التدقيق
+python -m intelligent_memory.cli provenance 12
+python -m intelligent_memory.cli audit --fact-id 12
 
 # تصدير الذاكرة بصيغ قياسية عالمية (Markdown, JSON, JSON-LD)
-python -m intelligent_memory.cli export --format markdown --output memories.md
+python -m intelligent_memory.cli export --format markdown --sources --output memories.md
 python -m intelligent_memory.cli export --format json-ld --output memories.jsonld
 
 # استيراد الحقائق من ملفات الملاحظات
@@ -135,8 +143,24 @@ python doctor.py --json
 ## 🗄️ دورة حياة الذاكرة وضغط الحقب القديمة
 
 - **الأرشفة الآلية للتقادم:** نقل الحقائق المتقادمة أو ذات التقييم السلبي تلقائياً من النشطة إلى المؤرشفة.
+- **الحاكمية:** `revoke` يخفي الحقيقة بشكل قابل للتراجع، و`restore` يعيدها، و`archive` يزيلها من الاسترجاع مع حفظ التاريخ، و`erase` يحذف النص وprovenance ويبقي بصمة SHA-256 في سجل التدقيق.
 - **ضغط الحقب (Epoch Compression):** دمج وتلخيص الحقائق المؤرشفة في حقائق حقبة موجزة لمنع تضخم سياق المحادثة مع الاحتفاظ بكامل بيانات التتبع والـ Provenance.
 - **تفريغ وتنظيف قاعدة البيانات (Vacuum):** استرجاع المساحات غير المستخدمة في القرص وتسريع فهارس B-tree.
+
+---
+
+## 🧪 التقييمات
+
+```bash
+# الحزمة العربية/المختلطة المدمجة (محلية وحتمية)
+python -m evals.runner --k 3
+
+# مجموعة JSONL خارجية (بنمط LoCoMo/LongMemEval بعد تحويلها محلياً)
+python -m evals.runner --dataset path/to/converted.jsonl --k 5
+```
+
+الحزمة المدمجة حارس انحدار وليست ادعاء نتيجة معيارية عامة. راجع
+[`evals/README.md`](evals/README.md) للتنسيق الخارجي وملاحظات الترخيص.
 
 ---
 

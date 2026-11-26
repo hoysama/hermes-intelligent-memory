@@ -73,6 +73,9 @@ class MemoryMigrator:
                         source="builtin",
                         source_ref=f"{filename}:{index}",
                         profile=self.profile,
+                        quote=content,
+                        quote_start=0,
+                        quote_end=len(content),
                         confidence=0.95,
                         importance=0.85,
                     )
@@ -119,6 +122,9 @@ class MemoryMigrator:
                     source="holographic",
                     source_ref=f"memory_store.db:{row['fact_id']}",
                     profile=self.profile,
+                    quote=content,
+                    quote_start=0,
+                    quote_end=len(content),
                     confidence=max(0.0, min(1.0, trust)),
                     importance=0.65,
                 )

@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-purple.svg)](LICENSE)
 [![Hermes Plugin](https://img.shields.io/badge/Hermes-Standalone%20Plugin-emerald.svg)](plugin.yaml)
 
-`hermes-intelligent-memory` is an official, local-first, Arabic/multilingual `MemoryProvider` plugin for **Hermes Agent**. It provides high-performance, deterministic hybrid memory retrieval, append-only provenance tracking, and seamless projection sync with `MEMORY.md` and `USER.md`.
+`hermes-intelligent-memory` is an official, local-first, Arabic/multilingual `MemoryProvider` plugin for **Hermes Agent**. It provides high-performance, deterministic hybrid lexical retrieval, append-only provenance (except explicit erasure) with verbatim source quotes, governance controls, and seamless projection sync with `MEMORY.md` and `USER.md`.
 
 Read this documentation in [🇸🇦 Arabic / بالعربية](README.ar.md).
 
@@ -15,10 +15,12 @@ Read this documentation in [🇸🇦 Arabic / بالعربية](README.ar.md).
 
 - **🇸🇦 Arabic & Multilingual First-Class Support:** Advanced text normalization, token overlap matching, and character trigrams for Arabic and mixed Arabic/English substring recall.
 - **⚡ Local-First & Deterministic (Zero-Latency Hot Path):** Retrieval operates 100% locally via SQLite (`WAL` mode) using FTS5 and trigram indexing. Cloud inference is never on the critical path.
-- **📜 Append-Only Provenance & Immutable Lifecycle:** Full memory lifecycle management (`active`, `superseded`, `archived`, `rejected`) with audit trails and lineage tracking.
+- **📜 Append-Only Provenance & Verbatim Sources:** Facts keep their source reference and, when available, a verbatim quote with character offsets, so recall can show what was actually said.
+- **🛡️ Governance & Audit:** Reversible `revoke`, audited `archive`, and `erase` with a tombstone hash; lifecycle covers `active`, `superseded`, `archived`, `revoked`, `erased`, and `rejected`.
 - **🔄 Projections Sync (`MEMORY.md` & `USER.md`):** High-importance global facts automatically materialize into markdown projections with atomic writes and safety backups.
-- **🔒 Isolated Profile Scoping:** Profile-scoped storage under `$HERMES_HOME/intelligent_memory/memory.db`.
-- **🛠️ Built-In Hermes Plugin CLI:** Diagnostics, migration utilities, and native plugin hooks.
+- **🔒 Isolated Profile Scoping:** Profile-scoped storage under `$HERMES_HOME/intelligent_memory/memory.db`; scope labels add a narrower filter on top.
+- **🧪 Offline Evaluations:** Deterministic Arabic/mixed retrieval suite plus an external JSONL adapter for LoCoMo/LongMemEval-style datasets.
+- **🛠️ Built-In Hermes Plugin CLI:** Diagnostics, migration utilities, audit inspection, and native plugin hooks.
 
 ---
 
@@ -32,7 +34,7 @@ graph TD
     B --> E[Projection Engine]
     E --> F[MEMORY.md]
     E --> G[USER.md]
-    B -.->|Selective Async| H[Cloud Inference / Reranking]
+    B -.->|Selective Async| H[Selective Cloud Extraction]
 ```
 
 ### Retrieval Pipeline
@@ -90,8 +92,9 @@ memory:
 | `intelligent_memory_remember` | Store one durable structured fact in intelligent memory |
 | `intelligent_memory_recall` | Search active intelligent-memory facts relevant to a query |
 | `intelligent_memory_revise` | Replace one durable fact while preserving its lineage |
-| `intelligent_memory_forget` | Archive one fact without deleting its history |
-| `intelligent_memory_status` | Report provider status and fact counts |
+| `intelligent_memory_forget` | Archive, revoke, or erase one fact (erase keeps an audit tombstone only) |
+| `intelligent_memory_restore` | Restore a revoked fact to active recall |
+| `intelligent_memory_status` | Report provider status and per-status fact counts |
 | `intelligent_memory_feedback` | Record usefulness feedback to refine recall scoring |
 
 ---
@@ -101,11 +104,15 @@ memory:
 Manage, search, export, and import your memories directly from the terminal without launching Hermes:
 
 ```bash
-# Search active facts
-python -m intelligent_memory.cli search "query terms"
+# Search active facts with source quotes
+python -m intelligent_memory.cli search "query terms" --sources
+
+# Inspect provenance and governance audit history
+python -m intelligent_memory.cli provenance 12
+python -m intelligent_memory.cli audit --fact-id 12
 
 # Export memory to standard formats (markdown, json, json-ld)
-python -m intelligent_memory.cli export --format markdown --output memories.md
+python -m intelligent_memory.cli export --format markdown --sources --output memories.md
 python -m intelligent_memory.cli export --format json-ld --output memories.jsonld
 
 # Import memory facts from seed files
@@ -135,8 +142,24 @@ python doctor.py --json
 ## 🗄️ Memory Lifecycle & Epoch Compression
 
 - **Staleness Auto-Archiving:** Automatically transitions inactive or negatively rated facts from `active` to `archived`.
+- **Governance:** `revoke` hides a fact reversibly, `restore` brings it back, `archive` removes it from recall with history intact, and `erase` deletes the text plus provenance while keeping a SHA-256 tombstone in the audit log.
 - **Epoch Compression:** Consolidates historical archived facts into structured `epoch_summary` facts to prevent context bloat while retaining complete provenance history.
 - **Vacuum & Page Defragmentation:** Reclaims disk space and optimizes SQLite B-tree pages and FTS token inverted indices.
+
+---
+
+## 🧪 Evaluations
+
+```bash
+# Built-in Arabic/mixed retrieval suite (offline, deterministic)
+python -m evals.runner --k 3
+
+# External JSONL dataset (LoCoMo/LongMemEval-style, converted locally)
+python -m evals.runner --dataset path/to/converted.jsonl --k 5
+```
+
+The built-in suite is a regression guard, not a public benchmark claim. See
+[`evals/README.md`](evals/README.md) for the external format and licensing notes.
 
 ---
 
