@@ -16,6 +16,18 @@ Standalone local-first MemoryProvider for Hermes Agent.
 - self-healing diagnostics with automatic repair (`doctor.py --fix`)
 - no API keys owned by this plugin
 
+## Tools
+
+| Tool | Description |
+| :--- | :--- |
+| `intelligent_memory_remember` | Store one durable structured fact |
+| `intelligent_memory_recall` | Search active facts; includes verbatim sources when available |
+| `intelligent_memory_revise` | Supersede a fact while preserving lineage |
+| `intelligent_memory_forget` | Archive, revoke, or erase one fact |
+| `intelligent_memory_restore` | Restore a revoked fact |
+| `intelligent_memory_status` | Report provider status and per-status counts |
+| `intelligent_memory_feedback` | Record usefulness feedback for ranking |
+
 ## Activation & Configuration
 
 Copy this directory to `$HERMES_HOME/plugins/intelligent_memory`, then configure `~/.hermes/config.yaml`:
