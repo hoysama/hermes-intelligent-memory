@@ -19,7 +19,6 @@ Read this documentation in [🇸🇦 Arabic / بالعربية](README.ar.md).
 - **🛡️ Governance & Audit:** Reversible `revoke`, audited `archive`, and `erase` with a tombstone hash; lifecycle covers `active`, `superseded`, `archived`, `revoked`, `erased`, and `rejected`.
 - **🔄 Projections Sync (`MEMORY.md` & `USER.md`):** High-importance global facts automatically materialize into markdown projections with atomic writes and safety backups.
 - **🔒 Isolated Profile Scoping:** Profile-scoped storage under `$HERMES_HOME/intelligent_memory/memory.db`; scope labels add a narrower filter on top.
-- **🧪 Offline Evaluations:** Deterministic Arabic/mixed retrieval suite plus an external JSONL adapter for LoCoMo/LongMemEval-style datasets.
 - **🛠️ Built-In Hermes Plugin CLI:** Diagnostics, migration utilities, audit inspection, and native plugin hooks.
 
 ---
@@ -145,21 +144,6 @@ python doctor.py --json
 - **Governance:** `revoke` hides a fact reversibly, `restore` brings it back, `archive` removes it from recall with history intact, and `erase` deletes the text plus provenance while keeping a SHA-256 tombstone in the audit log.
 - **Epoch Compression:** Consolidates historical archived facts into structured `epoch_summary` facts to prevent context bloat while retaining complete provenance history.
 - **Vacuum & Page Defragmentation:** Reclaims disk space and optimizes SQLite B-tree pages and FTS token inverted indices.
-
----
-
-## 🧪 Evaluations
-
-```bash
-# Built-in Arabic/mixed retrieval suite (offline, deterministic)
-python -m evals.runner --k 3
-
-# External JSONL dataset (LoCoMo/LongMemEval-style, converted locally)
-python -m evals.runner --dataset path/to/converted.jsonl --k 5
-```
-
-The built-in suite is a regression guard, not a public benchmark claim. See
-[`evals/README.md`](evals/README.md) for the external format and licensing notes.
 
 ---
 
